@@ -1,22 +1,37 @@
 #include "Labs/4-Final/CaseAngryBirds3D.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
+#include <cstdlib>
 #include <numbers>
+#include <string>
+#include <vector>
 
 #include <glm/ext.hpp>
 #include <imgui_internal.h>
 
 #include "Engine/app.h"
 #include "Engine/GL/Texture.hpp"
+#include "Labs/4-Final/Levels/LevelRegistry.h"
 #include "Labs/Common/ImGuiHelper.h"
 
 namespace VCX::Labs::Final {
+    namespace {
+        float frand() { return float(std::rand()) / float(RAND_MAX); }       // [0,1]
+        float frand2() { return frand() * 2.f - 1.f; }                        // [-1,1]
+        char const * const c_ShotNames[] = { "Bird", "Water Balloon", "Jelly" };
+    }
+
     CaseAngryBirds3D::CaseAngryBirds3D():
         _program(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/sphere_phong.vert"),
                                              Engine::GL::SharedShader("assets/shaders/phong.frag") })),
         _lineProgram(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/flat.vert"),
                                                  Engine::GL::SharedShader("assets/shaders/flat.frag") })),
+        _skyProgram(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/sky.vert"),
+                                                Engine::GL::SharedShader("assets/shaders/sky.frag") })),
+        _pointProgram(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/point.vert"),
+                                                  Engine::GL::SharedShader("assets/shaders/point.frag") })),
         _boxItem(Engine::GL::VertexLayout()
             .Add<Vertex>("vertex", Engine::GL::DrawFrequency::Stream)
             .At<Vertex, glm::vec3>(0, &Vertex::Position)
@@ -30,9 +45,21 @@ namespace VCX::Labs::Final {
             .At<Vertex, glm::vec2>(2, &Vertex::TexCoord)
             .At<Vertex, glm::vec3>(3, &Vertex::Offset), Engine::GL::PrimitiveType::Triangles),
         _lineItem(Engine::GL::VertexLayout().Add<glm::vec3>("position", Engine::GL::DrawFrequency::Stream, 0), Engine::GL::PrimitiveType::Lines),
+        _fluidItem(Engine::GL::VertexLayout()
+            .Add<FluidVertex>("vertex", Engine::GL::DrawFrequency::Stream)
+            .At<FluidVertex, glm::vec3>(0, &FluidVertex::Position)
+            .At<FluidVertex, glm::vec3>(1, &FluidVertex::Color), Engine::GL::PrimitiveType::Points),
+        _skyItem(Engine::GL::VertexLayout().Add<glm::vec3>("position", Engine::GL::DrawFrequency::Static, 0), Engine::GL::PrimitiveType::Triangles),
         _passConstantsBlock(1, Engine::GL::DrawFrequency::Stream) {
         BuildStaticGeometry();
         BuildSphereGeometry();
+
+        // 풀스크린 하늘 사각형 (한 번만 업로드).
+        std::vector<glm::vec3> const skyVerts = {
+            { -1.f, -1.f, 0.f }, {  1.f, -1.f, 0.f }, {  1.f,  1.f, 0.f },
+            { -1.f, -1.f, 0.f }, {  1.f,  1.f, 0.f }, { -1.f,  1.f, 0.f },
+        };
+        _skyItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(skyVerts));
 
         VCX::Engine::Texture2D<VCX::Engine::Formats::RGBA8> diffuse{1, 1};
         diffuse.Fill({ 0xff, 0xff, 0xff, 0xff });
@@ -62,22 +89,42 @@ namespace VCX::Labs::Final {
         _cameraManager.AutoRotate = false;
         _cameraManager.EnableDamping = true;
         _cameraManager.EnablePan = true;
-        _cameraManager.MinDistance = 4.f;
-        _cameraManager.MaxDistance = 40.f;
+        _cameraManager.MinDistance = 4.f * WorldScale;
+        _cameraManager.MaxDistance = 40.f * WorldScale;
         _cameraManager.Save(_camera);
 
+        _levels = CreateAllLevels();
         ResetScene();
     }
 
     void CaseAngryBirds3D::OnSetupPropsUI() {
-        static char const * const LevelNames[] = {
-            "Classic Tower",
-            "Stone Castle",
-            "Target Practice",
-        };
-
-        if (ImGui::Combo("Level", &_levelIndex, LevelNames, IM_ARRAYSIZE(LevelNames))) {
+        std::vector<char const *> levelNames;
+        levelNames.reserve(_levels.size());
+        for (auto const & level : _levels) {
+            levelNames.push_back(level->Name().data());
+        }
+        if (ImGui::Combo("Level", &_levelIndex, levelNames.data(), int(levelNames.size()))) {
             ResetScene();
+        }
+
+        // 발사체 선택 (레벨이 여러 종류를 허용할 때만).
+        std::vector<ShotType> const shots = _levels[_levelIndex]->Shots();
+        if (shots.size() > 1) {
+            std::vector<char const *> shotNames;
+            int sel = 0;
+            for (int i = 0; i < int(shots.size()); ++i) {
+                shotNames.push_back(c_ShotNames[int(shots[i])]);
+                if (shots[i] == _currentShot) sel = i;
+            }
+            if (ImGui::Combo("Projectile", &sel, shotNames.data(), int(shotNames.size()))) {
+                _currentShot = shots[sel];
+                if (!_birdLaunched) {   // 아직 안 쐈으면 대기 중인 발사체를 즉시 교체
+                    for (auto & bd : _world.Rigid.Bodies) {
+                        if (bd.Kind == BodyKind::Bird || bd.Kind == BodyKind::WaterBalloon) bd.IsAlive = false;
+                    }
+                    _birdIndex = SpawnProjectile();
+                }
+            }
         }
 
         if (ImGui::Button("Reset Scene", ImVec2(250, 0))) {
@@ -95,13 +142,13 @@ namespace VCX::Labs::Final {
         ImGui::Checkbox("Pause", &_pause);
         ImGui::SliderFloat("Launch Power", &_powerScale, 2.f, 12.f, "%.1f");
         ImGui::SliderFloat("Break Threshold", &_breakThreshold, 2.f, 18.f, "%.1f");
-        ImGui::SliderFloat("Restitution", &_physics.Restitution, .05f, .8f, "%.2f");
-        ImGui::SliderFloat("Friction", &_physics.Friction, .2f, .98f, "%.2f");
+        ImGui::SliderFloat("Restitution", &_world.Rigid.Restitution, .05f, .8f, "%.2f");
+        ImGui::SliderFloat("Friction", &_world.Rigid.Friction, .2f, .98f, "%.2f");
         ImGui::SliderInt("Substeps", &_substeps, 1, 12);
 
         int aliveBreakables = 0;
         int aliveTargets = 0;
-        for (auto const & body : _physics.Bodies) {
+        for (auto const & body : _world.Rigid.Bodies) {
             if (body.IsAlive && body.Breakable && body.Kind != BodyKind::Bird) {
                 aliveBreakables++;
             }
@@ -121,7 +168,16 @@ namespace VCX::Labs::Final {
         ImGui::Text("Press R to reset level.");
         ImGui::Text("Alive target blocks: %d", aliveTargets);
         ImGui::Text("Alive breakable blocks: %d", aliveBreakables);
-        ImGui::Text("Fragments created: %d", _physics.FragmentsCreated);
+        ImGui::Text("Fragments created: %d", _world.Rigid.FragmentsCreated);
+        if (_world.Fluid) {
+            ImGui::Text("Fluid particles: %d", _world.Fluid->ParticleCount());
+        }
+
+        if (_gameState == GameState::Won) {
+            ImGui::TextColored(ImVec4(0.2f, 1.f, 0.2f, 1.f), "LEVEL CLEARED! Press R for next try.");
+        } else if (_gameState == GameState::Lost) {
+            ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "LEVEL FAILED. Press R to retry.");
+        }
     }
 
     Common::CaseRenderResult CaseAngryBirds3D::OnRender(std::pair<std::uint32_t, std::uint32_t> const desiredSize) {
@@ -140,12 +196,14 @@ namespace VCX::Labs::Final {
         if (!_pause) {
             int const steps = std::max(_substeps, 1);
             for (int i = 0; i < steps; ++i) {
-                StepSimulation(frameDt / float(steps));
+                StepSimulation(frameDt / float(steps));   // 강체 + 부력 (substep)
             }
+            _world.StepFluid(frameDt);                      // 유체는 프레임당 한 번
         }
 
         _cameraManager.Update(_camera);
         DrawScene(desiredSize);
+        DrawHUD();
 
         return Common::CaseRenderResult {
             .Fixed     = false,
@@ -164,39 +222,165 @@ namespace VCX::Labs::Final {
     }
 
     void CaseAngryBirds3D::ResetScene() {
+        _levelIndex = glm::clamp(_levelIndex, 0, int(_levels.size()) - 1);
+        ILevel & level = *_levels[_levelIndex];
+
         _dragging = false;
         _birdLaunched = false;
-        _dragPosition = _scene.Anchor;
-        _birdIndex = _scene.Reset(_physics, _breakThreshold, static_cast<AngryBirdsScene::Level>(_levelIndex));
         _gameStarted = false;
+        _gameState = GameState::Playing;
+
+        _world.Reset();
+        _anchor = level.Anchor();
+        _dragPosition = _anchor;
+        level.Setup(_world, _breakThreshold);          // 환경/타깃 배치 (유체 켜짐 포함)
+
+        // 현재 발사체가 이 레벨에서 가능한지 확인 후 보정.
+        std::vector<ShotType> const shots = level.Shots();
+        if (std::find(shots.begin(), shots.end(), _currentShot) == shots.end()) {
+            _currentShot = shots.empty() ? ShotType::Bird : shots.front();
+        }
+        _birdIndex = SpawnProjectile();
+
+        // 점수/발사 상태 초기화 + 현재 파괴 가능 개수 기록.
+        _score = 0;
+        _shotsUsed = 0;
+        _projRestTimer = 0.f;
+        _wonAwarded = false;
+        _prevTargets = 0;
+        _prevBlocks = 0;
+        for (auto const & b : _world.Rigid.Bodies) {
+            if (!b.IsAlive) continue;
+            if (b.Kind == BodyKind::Target) _prevTargets++;
+            else if (b.Breakable && (b.Kind == BodyKind::Wood || b.Kind == BodyKind::Glass || b.Kind == BodyKind::Stone)) _prevBlocks++;
+        }
     }
 
     void CaseAngryBirds3D::StepSimulation(float dt) {
-        _physics.Step(dt, _dragging ? _birdIndex : -1, _dragPosition);
+        // 발사 전 발사체는 새총에 고정 (중력에 떨어지지 않게, 항상 보이게).
+        // 드래그 중이면 드래그 위치로, 아니면 anchor 로.
+        int const pinIndex = (!_birdLaunched) ? _birdIndex : -1;
+        glm::vec3 const pinPos = _dragging ? _dragPosition : _anchor;
+        _world.Step(dt, pinIndex, pinPos);
+        _levels[_levelIndex]->Tick(_world, dt);
 
+        // 살아있는 발사체(구) 찾기.
         _birdIndex = -1;
-        for (int i = 0; i < int(_physics.Bodies.size()); ++i) {
-            if (_physics.Bodies[i].Kind == BodyKind::Bird) {
+        for (int i = 0; i < int(_world.Rigid.Bodies.size()); ++i) {
+            RigidBody const & b = _world.Rigid.Bodies[i];
+            if (b.IsAlive && (b.Kind == BodyKind::Bird || b.Kind == BodyKind::WaterBalloon)) {
                 _birdIndex = i;
                 break;
             }
         }
-        if (_birdIndex < 0 && !_birdLaunched) {
-            _birdIndex = _physics.AddBird(_scene.Anchor);
+
+        // 물풍선: 충돌하거나 물에 닿으면 터져서 유체를 분출.
+        if (_birdLaunched && _birdIndex >= 0 && _world.Rigid.Bodies[_birdIndex].Kind == BodyKind::WaterBalloon) {
+            RigidBody const & proj = _world.Rigid.Bodies[_birdIndex];
+            bool const inWater = _world.Fluid && _world.Fluid->InsideTankXZ(proj.Position)
+                && proj.Position.y < _world.Fluid->SurfaceWorldY(proj.Position.x, proj.Position.z);
+            if (proj.LastImpact > 2.0f * WorldScale || inWater) {
+                BurstBalloon(_birdIndex);
+                _birdIndex = -1;
+            }
+        }
+
+        // 자동 재장전: 발사한 발사체가 사라졌거나 충분히 멈추면 새것을 장전.
+        if (_birdLaunched) {
+            if (_birdIndex < 0) {
+                ReloadProjectile();
+            } else {
+                RigidBody const & proj = _world.Rigid.Bodies[_birdIndex];
+                float const speed = glm::length(proj.Velocity);
+                if (speed < 0.6f * WorldScale) _projRestTimer += dt;
+                else _projRestTimer = 0.f;
+                if (_projRestTimer > 0.8f) {
+                    _world.Rigid.Bodies[_birdIndex].IsAlive = false;  // 멈춘 발사체 회수
+                    ReloadProjectile();
+                    _birdIndex = -1;
+                }
+            }
+        } else if (_birdIndex < 0) {
+            _birdIndex = SpawnProjectile();   // 대기 발사체가 없으면 보충
+        }
+
+        UpdateScore();
+        _gameState = _levels[_levelIndex]->Status(_world);
+        if (_gameState == GameState::Won && !_wonAwarded) {
+            _score += 1000;        // 클리어 보너스
+            _wonAwarded = true;
+        }
+    }
+
+    void CaseAngryBirds3D::ReloadProjectile() {
+        _birdLaunched = false;
+        _dragging = false;
+        _projRestTimer = 0.f;
+        _dragPosition = _anchor;
+        _birdIndex = SpawnProjectile();
+    }
+
+    void CaseAngryBirds3D::UpdateScore() {
+        int curTargets = 0, curBlocks = 0;
+        for (auto const & b : _world.Rigid.Bodies) {
+            if (!b.IsAlive) continue;
+            if (b.Kind == BodyKind::Target) curTargets++;
+            else if (b.Breakable && (b.Kind == BodyKind::Wood || b.Kind == BodyKind::Glass || b.Kind == BodyKind::Stone)) curBlocks++;
+        }
+        if (curTargets < _prevTargets) _score += (_prevTargets - curTargets) * 500;
+        if (curBlocks  < _prevBlocks)  _score += (_prevBlocks  - curBlocks)  * 100;
+        _prevTargets = curTargets;
+        _prevBlocks  = curBlocks;
+    }
+
+    int CaseAngryBirds3D::SpawnProjectile() {
+        if (_currentShot == ShotType::WaterBalloon) {
+            return _world.Rigid.AddWaterBalloon(_anchor);
+        }
+        return _world.Rigid.AddBird(_anchor);   // Bird/Jelly(미구현) 기본은 새
+    }
+
+    bool CaseAngryBirds3D::ProjectileIsBalloon() const {
+        return _currentShot == ShotType::WaterBalloon;
+    }
+
+    void CaseAngryBirds3D::BurstBalloon(int index) {
+        if (index < 0 || index >= int(_world.Rigid.Bodies.size())) return;
+        RigidBody & b = _world.Rigid.Bodies[index];
+        glm::vec3 const pos = b.Position;
+        glm::vec3 const vel = b.Velocity;
+        b.IsAlive = false;   // 풍선 제거
+
+        if (_world.Fluid && _world.Fluid->InsideTankXZ(pos)) {
+            int const count = 180;
+            float const spread = 1.2f * WorldScale;
+            for (int i = 0; i < count; ++i) {
+                glm::vec3 const r(frand2(), frand2(), frand2());
+                glm::vec3 const off = r * (b.Radius * 0.9f);
+                glm::vec3 const pv = vel * 0.35f + r * spread;
+                _world.Fluid->AddParticleWorld(pos + off, pv);
+            }
         }
     }
 
     void CaseAngryBirds3D::LaunchBird() {
-        if (_birdIndex < 0 || _birdIndex >= int(_physics.Bodies.size())) return;
-        auto & bird = _physics.Bodies[_birdIndex];
-        glm::vec3 pull = _scene.Anchor - _dragPosition;
+        if (_birdIndex < 0 || _birdIndex >= int(_world.Rigid.Bodies.size())) return;
+        auto & bird = _world.Rigid.Bodies[_birdIndex];
+        glm::vec3 pull = _anchor - _dragPosition;
         pull.z = 0.f;
         bird.Position = _dragPosition;
         bird.Velocity = pull * _powerScale;
-        bird.AngularVel = glm::vec3(0.f, 0.f, -glm::length(pull) * 8.f);
-        bird.LifeTime = 20.f;
+        if (ProjectileIsBalloon()) {
+            bird.AngularVel = glm::vec3(0.f);   // 풍선은 거의 안 구름
+            bird.LifeTime   = 8.f;
+        } else {
+            bird.AngularVel = glm::vec3(0.f, 0.f, -glm::length(pull) * 8.f);
+            bird.LifeTime   = 8.f;
+        }
         _birdLaunched = true;
-        _gameStarted = false;
+        _projRestTimer = 0.f;
+        _shotsUsed++;
+        // _gameStarted 는 유지 → 재장전 후 바로 다시 드래그 가능.
     }
 
     void CaseAngryBirds3D::HandleSlingshotInput(ImVec2 const & mousePos) {
@@ -215,17 +399,17 @@ namespace VCX::Labs::Final {
         }
         if (_dragging && leftHeld) {
             glm::vec3 const planePos = ScreenToLaunchPlane(mousePos);
-            _dragPosition = _scene.Anchor;
+            _dragPosition = _anchor;
             _dragPosition.x = planePos.x;
             _dragPosition.y = planePos.y;
 
-            float const maxPull = 2.2f;
-            glm::vec2 const pullXY = glm::vec2(_dragPosition.x - _scene.Anchor.x, _dragPosition.y - _scene.Anchor.y);
+            float const maxPull = 2.2f * WorldScale;
+            glm::vec2 const pullXY = glm::vec2(_dragPosition.x - _anchor.x, _dragPosition.y - _anchor.y);
             float const pullLen = glm::length(pullXY);
             if (pullLen > maxPull) {
                 glm::vec2 const pullDir = glm::normalize(pullXY);
-                _dragPosition.x = _scene.Anchor.x + pullDir.x * maxPull;
-                _dragPosition.y = _scene.Anchor.y + pullDir.y * maxPull;
+                _dragPosition.x = _anchor.x + pullDir.x * maxPull;
+                _dragPosition.y = _anchor.y + pullDir.y * maxPull;
             }
         }
         if (_dragging && leftReleased) {
@@ -254,7 +438,7 @@ namespace VCX::Labs::Final {
         float const denom = glm::dot(rayDir, planeNormal);
         if (std::abs(denom) < 1e-5f) return _dragPosition;
 
-        float const t = (_scene.Anchor.z - rayOrigin.z) / rayDir.z;
+        float const t = (_anchor.z - rayOrigin.z) / rayDir.z;
         return rayOrigin + rayDir * t;
     }
 
@@ -299,26 +483,36 @@ namespace VCX::Labs::Final {
             .Projection           = projection,
             .View                 = view,
             .ViewPosition         = _camera.Eye,
-            .AmbientIntensity     = glm::vec3(2.5f),
+            .AmbientIntensity     = glm::vec3(1.7f),
             .Lights               = {
-                Rendering::SceneObject::Light {
-                    .Intensity  = glm::vec3(.55f),
-                    .Direction  = glm::normalize(glm::vec3(0.f, 1.f, 0.2f)),
+                Rendering::SceneObject::Light {   // key light (warm, upper-front)
+                    .Intensity  = glm::vec3(.95f, .90f, .80f),
+                    .Direction  = glm::normalize(glm::vec3(-.35f, 1.f, .45f)),
                     .Position   = glm::vec3(0.f),
                     .CutOff     = 1.f,
                     .OuterCutOff= 0.f,
-                }
+                },
+                Rendering::SceneObject::Light {   // fill light (cool, opposite)
+                    .Intensity  = glm::vec3(.28f, .33f, .42f),
+                    .Direction  = glm::normalize(glm::vec3(.5f, .5f, -.5f)),
+                    .Position   = glm::vec3(0.f),
+                    .CutOff     = 1.f,
+                    .OuterCutOff= 0.f,
+                },
             },
             .CntPointLights       = 0,
             .CntSpotLights        = 0,
-            .CntDirectionalLights = 1,
+            .CntDirectionalLights = 2,
         };
         _passConstantsBlock.Update(passConstants);
 
         _lineProgram.GetUniforms().SetByName("u_Projection", projection);
         _lineProgram.GetUniforms().SetByName("u_View", view);
+        _pointProgram.GetUniforms().SetByName("u_Projection", projection);
+        _pointProgram.GetUniforms().SetByName("u_View", view);
 
         gl_using(_frame);
+        DrawSky();
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_LINE_SMOOTH);
         glLineWidth(1.2f);
@@ -326,24 +520,31 @@ namespace VCX::Labs::Final {
         RigidBody ground;
         ground.Kind = BodyKind::Ground;
         ground.IsStatic = true;
-        ground.Position = glm::vec3(1.5f, -.06f, 0.f);
-        ground.HalfSize = glm::vec3(10.f, .06f, 4.f);
+        ground.Position = glm::vec3(1.5f, -.06f, 0.f) * WorldScale;
+        ground.HalfSize = glm::vec3(10.f, .06f, 4.f) * WorldScale;
         ground.Color = glm::vec3(.24f, .46f, .22f);
         DrawBox(ground);
 
-        for (auto const & body : _physics.Bodies) {
+        DrawScenery();
+
+        for (auto const & body : _world.Rigid.Bodies) {
             if (!body.IsAlive) continue;
             if (body.Kind == BodyKind::Bird) {
+                DrawSphere(body);
+                DrawBirdFace(body);
+            } else if (body.Kind == BodyKind::WaterBalloon) {
                 DrawSphere(body);
             } else {
                 DrawBox(body);
             }
         }
 
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.1f, .05f, .02f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.1f, .05f, .02f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _scene.Anchor + glm::vec3(0.f, -.5f, -.55f), glm::vec3(.32f, .16f, .06f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _scene.Anchor + glm::vec3(0.f, -.5f, .55f), glm::vec3(.32f, .16f, .06f));
+        DrawFluid();
+
+        DrawLine(_anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _anchor, glm::vec3(.1f, .05f, .02f));
+        DrawLine(_anchor + glm::vec3(0.f, .85f, .55f), _dragging ? _dragPosition : _anchor, glm::vec3(.1f, .05f, .02f));
+        DrawLine(_anchor + glm::vec3(0.f, .85f, -.55f), _anchor + glm::vec3(0.f, -.5f, -.55f), glm::vec3(.32f, .16f, .06f));
+        DrawLine(_anchor + glm::vec3(0.f, .85f, .55f), _anchor + glm::vec3(0.f, -.5f, .55f), glm::vec3(.32f, .16f, .06f));
         DrawTrajectoryPreview();
 
         glLineWidth(1.f);
@@ -422,14 +623,173 @@ namespace VCX::Labs::Final {
     void CaseAngryBirds3D::DrawTrajectoryPreview() {
         if (!_dragging) return;
         glm::vec3 pos = _dragPosition;
-        glm::vec3 vel = (_scene.Anchor - _dragPosition) * _powerScale;
+        glm::vec3 vel = (_anchor - _dragPosition) * _powerScale;
         glm::vec3 prev = pos;
         for (int i = 0; i < 32; ++i) {
-            vel += _physics.Gravity * .07f;
+            vel += _world.Rigid.Gravity * .07f;
             pos += vel * .07f;
             DrawLine(prev, pos, glm::vec3(1.f, .86f, .25f));
             prev = pos;
             if (pos.y < GroundY) break;
+        }
+    }
+
+    void CaseAngryBirds3D::DrawSky() {
+        // 깊이 끄고 풀스크린 그라데이션 한 장.
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        _skyProgram.GetUniforms().SetByName("u_Top", glm::vec3(.33f, .55f, .85f));
+        _skyProgram.GetUniforms().SetByName("u_Bottom", glm::vec3(.82f, .91f, .98f));
+        _skyItem.Draw({ _skyProgram.Use() });
+        glDepthMask(GL_TRUE);
+        glEnable(GL_DEPTH_TEST);
+    }
+
+    void CaseAngryBirds3D::DrawScenery() {
+        // 그리기 전용 임시 바디 헬퍼 (물리에는 영향 없음). 좌표는 디자인 단위 * WorldScale.
+        auto box = [&](glm::vec3 pos, glm::vec3 half, glm::vec3 col) {
+            RigidBody b;
+            b.Position = pos * WorldScale;
+            b.HalfSize = half * WorldScale;
+            b.Rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
+            b.Color    = col;
+            b.Scale    = 1.f;
+            DrawBox(b);
+        };
+        auto sphere = [&](glm::vec3 pos, float r, glm::vec3 col) {
+            RigidBody b;
+            b.Position = pos * WorldScale;
+            b.Radius   = r * WorldScale;
+            b.Color    = col;
+            b.Scale    = 1.f;
+            DrawSphere(b);
+        };
+
+        // 먼 언덕 (납작하지 않은 큰 구 — 지평선 위로 둥근 능선).
+        sphere({ -3.f, -4.0f, -13.f },  9.5f, glm::vec3(.30f, .52f, .28f));
+        sphere({ 13.f, -4.5f, -15.f }, 11.0f, glm::vec3(.25f, .47f, .24f));
+        sphere({  5.f, -5.0f, -20.f }, 13.0f, glm::vec3(.22f, .42f, .26f));
+
+        // 구름.
+        glm::vec3 const cloud(.96f, .98f, 1.f);
+        auto puff = [&](glm::vec3 c) {
+            sphere(c,                          1.5f, cloud);
+            sphere(c + glm::vec3(1.6f, .2f, 0), 1.8f, cloud);
+            sphere(c + glm::vec3(3.1f, 0, .3f), 1.3f, cloud);
+        };
+        puff({ -7.f, 10.5f, -7.f });
+        puff({  4.f, 12.0f, -9.f });
+        puff({ 12.f,  9.5f, -3.f });
+
+        // 나무 (줄기 + 잎).
+        auto tree = [&](glm::vec3 base) {
+            box(base + glm::vec3(0.f, .85f, 0.f), glm::vec3(.18f, .85f, .18f), glm::vec3(.40f, .26f, .13f));
+            sphere(base + glm::vec3(0.f, 2.0f, 0.f), 1.0f, glm::vec3(.20f, .48f, .22f));
+        };
+        tree({ -7.5f, 0.f,  4.5f });
+        tree({ -9.0f, 0.f, -3.5f });
+        tree({  9.5f, 0.f,  5.0f });
+        tree({ 11.5f, 0.f, -3.0f });
+    }
+
+    void CaseAngryBirds3D::DrawBirdFace(RigidBody const & body) {
+        glm::vec3 const fwd   = body.Rotation * glm::vec3(1.f, 0.f, 0.f);
+        glm::vec3 const up    = body.Rotation * glm::vec3(0.f, 1.f, 0.f);
+        glm::vec3 const right = body.Rotation * glm::vec3(0.f, 0.f, 1.f);
+        float const r = body.Radius;
+
+        auto eye = [&](float side, glm::vec3 col, float rad, float fwdExtra) {
+            RigidBody b;
+            b.Position = body.Position + fwd * (r * (.72f + fwdExtra)) + up * (r * .34f) + right * (r * .34f * side);
+            b.Radius   = r * rad;
+            b.Color    = col;
+            b.Scale    = 1.f;
+            DrawSphere(b);
+        };
+        // 흰자 + 눈동자.
+        eye(+1.f, glm::vec3(1.f), .30f, 0.f);
+        eye(-1.f, glm::vec3(1.f), .30f, 0.f);
+        eye(+1.f, glm::vec3(.04f), .15f, .12f);
+        eye(-1.f, glm::vec3(.04f), .15f, .12f);
+
+        // 부리.
+        RigidBody beak;
+        beak.Position = body.Position + fwd * (r * .92f) - up * (r * .08f);
+        beak.HalfSize = glm::vec3(r * .26f, r * .16f, r * .18f);
+        beak.Rotation = body.Rotation;
+        beak.Color    = glm::vec3(1.f, .60f, .05f);
+        beak.Scale    = 1.f;
+        DrawBox(beak);
+    }
+
+    void CaseAngryBirds3D::DrawFluid() {
+        if (!_world.Fluid) return;
+        FluidWorld const & fluid = *_world.Fluid;
+
+        // 물 입자를 둥근 점으로 렌더. 색은 솔버가 계산한 속도 기반 색(파랑→청록→노랑→빨강).
+        int const n = fluid.ParticleCount();
+        if (n > 0) {
+            std::vector<FluidVertex> verts;
+            verts.reserve(n);
+            for (int i = 0; i < n; ++i) {
+                verts.push_back(FluidVertex { fluid.ParticleWorld(i), fluid.Solver.m_particleColor[i] });
+            }
+            _fluidItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<FluidVertex>(verts));
+            glPointSize(7.f);
+            _fluidItem.Draw({ _pointProgram.Use() });
+            glPointSize(1.f);
+        }
+
+        // 물탱크(해자) 윤곽선 12개 모서리.
+        glm::vec3 const lo = fluid.BoxMin();
+        glm::vec3 const hi = fluid.BoxMax();
+        glm::vec3 const edgeColor(.2f, .5f, .7f);
+        glm::vec3 const v[8] = {
+            { lo.x, lo.y, lo.z }, { hi.x, lo.y, lo.z }, { hi.x, lo.y, hi.z }, { lo.x, lo.y, hi.z },
+            { lo.x, hi.y, lo.z }, { hi.x, hi.y, lo.z }, { hi.x, hi.y, hi.z }, { lo.x, hi.y, hi.z },
+        };
+        int const edges[12][2] = {
+            { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 },
+            { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 },
+            { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 },
+        };
+        for (auto const & e : edges) DrawLine(v[e[0]], v[e[1]], edgeColor);
+    }
+
+    void CaseAngryBirds3D::DrawHUD() {
+        ImGuiViewport const * vp = ImGui::GetMainViewport();
+        ImDrawList * dl = ImGui::GetForegroundDrawList();
+        ImFont * font = ImGui::GetIO().Fonts->Fonts[0];
+
+        float const cx  = vp->Pos.x + vp->Size.x * 0.5f;
+        float const top = vp->Pos.y + 14.f;
+
+        std::string const scoreStr = "SCORE  " + std::to_string(_score);
+        float const bigSize = 34.f;
+        ImVec2 const ssz = font->CalcTextSizeA(bigSize, FLT_MAX, 0.f, scoreStr.c_str());
+
+        int targetsLeft = 0;
+        for (auto const & b : _world.Rigid.Bodies)
+            if (b.IsAlive && b.Kind == BodyKind::Target) targetsLeft++;
+        std::string const subStr = "Targets " + std::to_string(targetsLeft) + "     Shots " + std::to_string(_shotsUsed);
+        float const subSize = 18.f;
+        ImVec2 const subsz = font->CalcTextSizeA(subSize, FLT_MAX, 0.f, subStr.c_str());
+
+        float const boxW = std::max(ssz.x, subsz.x) + 48.f;
+        float const boxH = bigSize + subSize + 24.f;
+        ImVec2 const p0(cx - boxW * 0.5f, top);
+        ImVec2 const p1(cx + boxW * 0.5f, top + boxH);
+        dl->AddRectFilled(p0, p1, IM_COL32(18, 22, 30, 175), 10.f);
+        dl->AddRect(p0, p1, IM_COL32(255, 255, 255, 45), 10.f);
+
+        dl->AddText(font, bigSize, ImVec2(cx - ssz.x * 0.5f, top + 8.f), IM_COL32(255, 220, 90, 255), scoreStr.c_str());
+        dl->AddText(font, subSize, ImVec2(cx - subsz.x * 0.5f, top + 12.f + bigSize), IM_COL32(220, 230, 240, 255), subStr.c_str());
+
+        if (_gameState == GameState::Won) {
+            std::string const w = "LEVEL CLEARED!";
+            float const wsz = 30.f;
+            ImVec2 const wd = font->CalcTextSizeA(wsz, FLT_MAX, 0.f, w.c_str());
+            dl->AddText(font, wsz, ImVec2(cx - wd.x * 0.5f, top + boxH + 10.f), IM_COL32(120, 255, 120, 255), w.c_str());
         }
     }
 } // namespace VCX::Labs::Final

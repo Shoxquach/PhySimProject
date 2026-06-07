@@ -1,4 +1,4 @@
-#include "Labs/4-Final/AngryBirdsPhysics.h"
+#include "Labs/4-Final/Physics/RigidWorld.h"
 
 #include <algorithm>
 #include <array>
@@ -52,12 +52,16 @@ namespace VCX::Labs::Final {
             return body.Velocity + glm::cross(body.AngularVel, point - body.Position);
         }
 
+        bool IsSphereKind(BodyKind k) {
+            return k == BodyKind::Bird || k == BodyKind::WaterBalloon;
+        }
+
         fcl::CollisionObjectf CreateCollisionObject(RigidBody const & body) {
             fcl::Transform3f transform = fcl::Transform3f::Identity();
             transform.translation() = Eigen::Vector3f(body.Position.x, body.Position.y, body.Position.z);
             transform.linear() = Eigen::Quaternionf(body.Rotation.w, body.Rotation.x, body.Rotation.y, body.Rotation.z).toRotationMatrix();
 
-            if (body.Kind == BodyKind::Bird) {
+            if (IsSphereKind(body.Kind)) {
                 auto shape = std::make_shared<fcl::Spheref>(body.Radius);
                 return fcl::CollisionObjectf(shape, transform);
             }
@@ -97,15 +101,15 @@ namespace VCX::Labs::Final {
         }
     }
 
-    void AngryBirdsPhysics::Clear() {
+    void RigidWorld::Clear() {
         Bodies.clear();
         FragmentsCreated = 0;
     }
 
-    int AngryBirdsPhysics::AddBird(glm::vec3 const & anchor) {
+    int RigidWorld::AddBird(glm::vec3 const & anchor) {
         RigidBody bird;
         bird.Kind = BodyKind::Bird;
-        bird.Mass = 1.4f;
+        bird.Mass = 1.4f * WorldScale * WorldScale * WorldScale; // 부피(∝S^3)에 맞춰 질량 스케일 → 블록과의 질량비 유지
         bird.InvMass = 1.f / bird.Mass;
         bird.Position = anchor;
         bird.Radius = BirdRadius;
@@ -125,7 +129,31 @@ namespace VCX::Labs::Final {
         return int(Bodies.size()) - 1;
     }
 
-    int AngryBirdsPhysics::AddBox(BodyKind kind, glm::vec3 position, glm::vec3 halfSize, float density, glm::vec3 color, float toughness, bool breakable) {
+    int RigidWorld::AddWaterBalloon(glm::vec3 const & anchor) {
+        RigidBody b;
+        b.Kind = BodyKind::WaterBalloon;
+        b.Mass = 1.0f * WorldScale * WorldScale * WorldScale;
+        b.InvMass = 1.f / b.Mass;
+        b.Position = anchor;
+        b.Radius = BirdRadius * 1.1f;
+        b.HalfSize = glm::vec3(b.Radius);
+        b.Color = glm::vec3(.2f, .5f, .95f);
+        b.Breakable = false;   // 터짐(burst)은 Case 가 처리한다
+        b.Toughness = 100.f;
+        b.Age = 0.f;
+        b.LifeTime = -1.f;
+        {
+            float const I = 2.f / 5.f * b.Mass * b.Radius * b.Radius;
+            b.InvInertiaLocal = glm::mat3(I > 0.f ? 1.f / I : 0.f);
+        }
+        Bodies.push_back(b);
+        return int(Bodies.size()) - 1;
+    }
+
+    int RigidWorld::AddBox(BodyKind kind, glm::vec3 position, glm::vec3 halfSize, float density, glm::vec3 color, float toughness, bool breakable) {
+        // 레벨은 디자인 단위로 배치하고, 무대 배율은 여기서 한 번에 적용한다.
+        position *= WorldScale;
+        halfSize *= WorldScale;
         RigidBody body;
         body.Kind = kind;
         float const volume = 8.f * halfSize.x * halfSize.y * halfSize.z;
@@ -156,7 +184,7 @@ namespace VCX::Labs::Final {
         return int(Bodies.size()) - 1;
     }
 
-    void AngryBirdsPhysics::Step(float dt, int draggedIndex, glm::vec3 const & draggedPosition) {
+    void RigidWorld::Step(float dt, int draggedIndex, glm::vec3 const & draggedPosition) {
         if (draggedIndex >= 0 && draggedIndex < int(Bodies.size())) {
             auto & body = Bodies[draggedIndex];
             body.Position = draggedPosition;
@@ -176,7 +204,7 @@ namespace VCX::Labs::Final {
             Bodies.end());
     }
 
-    void AngryBirdsPhysics::Integrate(float dt, int draggedIndex) {
+    void RigidWorld::Integrate(float dt, int draggedIndex) {
         for (int i = 0; i < int(Bodies.size()); ++i) {
             auto & body = Bodies[i];
             if (!body.IsAlive || body.IsStatic || i == draggedIndex) {
@@ -205,9 +233,11 @@ namespace VCX::Labs::Final {
         }
     }
 
-    void AngryBirdsPhysics::ResolveCollisions() {
+    void RigidWorld::ResolveCollisions() {
         std::vector<Contact> contacts;
         std::vector<Contact> impactContacts;
+
+        for (auto & body : Bodies) body.LastImpact = 0.f;
 
         for (int iteration = 0; iteration < 12; ++iteration) {
             contacts.clear();
@@ -244,6 +274,8 @@ namespace VCX::Labs::Final {
                 glm::vec3 const relVel = ContactVelocity(b, c.Point) - ContactVelocity(a, c.Point);
                 float const normalVel = glm::dot(relVel, c.Normal);
                 c.Impact = std::max(c.Impact, std::max(-normalVel, 0.f));
+                a.LastImpact = std::max(a.LastImpact, c.Impact);
+                if (c.B >= 0) b.LastImpact = std::max(b.LastImpact, c.Impact);
                 if (c.Impact > 0.f) {
                     impactContacts.push_back(c);
                 }
@@ -310,7 +342,7 @@ namespace VCX::Labs::Final {
         TryBreakBodies(impactContacts);
     }
 
-    void AngryBirdsPhysics::TryBreakBodies(std::vector<Contact> const & contacts) {
+    void RigidWorld::TryBreakBodies(std::vector<Contact> const & contacts) {
         struct BreakRequest {
             int       Index = -1;
             glm::vec3 Normal = glm::vec3(0.f, 1.f, 0.f);
@@ -344,7 +376,7 @@ namespace VCX::Labs::Final {
         }
     }
 
-    void AngryBirdsPhysics::BreakBody(int index, glm::vec3 const & impulseDir, float impact) {
+    void RigidWorld::BreakBody(int index, glm::vec3 const & impulseDir, float impact) {
         RigidBody const source = Bodies[index];
         if (source.Generation >= 1 || source.Kind == BodyKind::Fragment) {
             Bodies[index].IsAlive = false;
@@ -390,42 +422,39 @@ namespace VCX::Labs::Final {
         }
     }
 
-    bool AngryBirdsPhysics::FindContact(int a, int b, Contact & contact) const {
+    bool RigidWorld::FindContact(int a, int b, Contact & contact) const {
         auto const & ba = Bodies[a];
         auto const & bb = Bodies[b];
         if (!ba.IsAlive || !bb.IsAlive || (ba.IsStatic && bb.IsStatic)) return false;
         if (ba.Kind == BodyKind::Fragment || bb.Kind == BodyKind::Fragment) return false;
 
-        if (ba.Kind == BodyKind::Bird && bb.Kind != BodyKind::Bird) {
-            return SphereBoxContact(ba, bb, a, b, contact);
-        }
-        if (bb.Kind == BodyKind::Bird && ba.Kind != BodyKind::Bird) {
-            // bb is the sphere and ba is the box: swap arguments and indices
-            return SphereBoxContact(bb, ba, b, a, contact);
-        }
-        return BoxBoxContact(ba, bb, a, b, contact);
+        // FCL 이 모양(구/박스)을 Kind 로 판별하므로 구-구/구-박스/박스-박스 모두 한 경로로 처리.
+        if (!QueryFclContact(ba, bb, contact)) return false;
+        contact.A = a;
+        contact.B = b;
+        return true;
     }
 
-    bool AngryBirdsPhysics::SphereBoxContact(RigidBody const & sphere, RigidBody const & box, int sphereIndex, int boxIndex, Contact & contact) const {
+    bool RigidWorld::SphereBoxContact(RigidBody const & sphere, RigidBody const & box, int sphereIndex, int boxIndex, Contact & contact) const {
         if (!QueryFclContact(sphere, box, contact)) return false;
         contact.A = sphereIndex;
         contact.B = boxIndex;
         return true;
     }
 
-    bool AngryBirdsPhysics::BoxBoxContact(RigidBody const & a, RigidBody const & b, int aIndex, int bIndex, Contact & contact) const {
+    bool RigidWorld::BoxBoxContact(RigidBody const & a, RigidBody const & b, int aIndex, int bIndex, Contact & contact) const {
         if (!QueryFclContact(a, b, contact)) return false;
         contact.A = aIndex;
         contact.B = bIndex;
         return true;
     }
 
-    bool AngryBirdsPhysics::GroundContact(RigidBody const & body, int index, Contact & contact) const {
+    bool RigidWorld::GroundContact(RigidBody const & body, int index, Contact & contact) const {
         if (body.IsStatic || !body.IsAlive || body.Kind == BodyKind::Fragment) return false;
 
         float bottom = body.Position.y - body.Radius;
         glm::vec3 contactPoint = glm::vec3(body.Position.x, GroundY, body.Position.z);
-        if (body.Kind != BodyKind::Bird) {
+        if (!IsSphereKind(body.Kind)) {
             bottom = std::numeric_limits<float>::max();
             glm::vec3 sumPoint(0.f);
             int count = 0;

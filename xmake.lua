@@ -96,9 +96,10 @@ target("lab4")
     set_kind("binary")
     add_deps("lab-common")
     add_packages("fcl")
-    add_headerfiles("src/VCX/Labs/4-Final/*.h")
-    add_headerfiles("src/VCX/Labs/4-Final/*.hpp")
-    add_files      ("src/VCX/Labs/4-Final/*.cpp")
+    add_includedirs("src/VCX/Labs/4-Final")
+    add_headerfiles("src/VCX/Labs/4-Final/**.h")
+    add_headerfiles("src/VCX/Labs/4-Final/**.hpp")
+    add_files      ("src/VCX/Labs/4-Final/**.cpp")
     if is_plat("windows") then
         add_cxflags("/EHsc")
     end

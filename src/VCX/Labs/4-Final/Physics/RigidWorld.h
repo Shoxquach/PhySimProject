@@ -5,6 +5,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "Labs/4-Final/Config.h"
+
 namespace VCX::Labs::Final {
     enum class BodyKind {
         Bird,
@@ -14,6 +16,7 @@ namespace VCX::Labs::Final {
         Stone,
         Fragment,
         Ground,
+        WaterBalloon,
     };
 
     struct RigidBody {
@@ -36,6 +39,7 @@ namespace VCX::Labs::Final {
         float     LifeTime   = -1.f;
         float     Scale      = 1.f;
         glm::mat3 InvInertiaLocal = glm::mat3(0.f);
+        float     LastImpact = 0.f;   // 이번 스텝 최대 충격 (물풍선 터짐 판정용)
     };
 
     struct Contact {
@@ -47,11 +51,11 @@ namespace VCX::Labs::Final {
         float     Impact      = 0.f;
     };
 
-    class AngryBirdsPhysics {
+    class RigidWorld {
     public:
         std::vector<RigidBody> Bodies;
 
-        glm::vec3 Gravity      = glm::vec3(0.f, -9.8f, 0.f);
+        glm::vec3 Gravity      = glm::vec3(0.f, -12.5f * WorldScale, 0.f);
         float     Restitution  = .28f;
         float     Friction     = .78f;
         float     LinearDamping = .9999f;
@@ -59,6 +63,7 @@ namespace VCX::Labs::Final {
         int       FragmentsCreated = 0;
 
         int  AddBird(glm::vec3 const & anchor);
+        int  AddWaterBalloon(glm::vec3 const & anchor);
         int  AddBox(BodyKind kind, glm::vec3 position, glm::vec3 halfSize, float density, glm::vec3 color, float toughness, bool breakable = true);
         void Step(float dt, int draggedIndex, glm::vec3 const & draggedPosition);
         void Clear();
@@ -76,5 +81,5 @@ namespace VCX::Labs::Final {
     };
 
     constexpr float GroundY = 0.f;
-    constexpr float BirdRadius = .38f;
+    constexpr float BirdRadius = .38f * WorldScale;
 }
