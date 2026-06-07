@@ -1,0 +1,143 @@
+commit 70d7145181872584811f450559cdaceead28cbac
+Author: jung <jung@jungui-MacBookPro.local>
+Date:   Sun Jun 7 22:04:46 2026 +0800
+
+    feat: 物理仿真小游戏《愤怒的水鸟》— 刚体×流体双向耦合
+    
+    模块化重构(World/ILevel/Coupling层); 移植Lab2 FLIP并实现刚体↔流体 two-way 耦合(浮力/流动拖拽/动态solid边界/粒子推出); 新增水球发射体(运行时注入粒子)、自动装填、顶部计分HUD、天空与圆形彩色水粒子渲染; 5个关卡(纯刚体→浮力→决堤); 引入WorldScale整体缩放。
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+ .gitignore                                         |   3 +
+ assets/shaders/point.frag                          |  16 +
+ assets/shaders/point.vert                          |  14 +
+ assets/shaders/sky.frag                            |  12 +
+ assets/shaders/sky.vert                            |  10 +
+ src/VCX/Labs/4-Final/AngryBirdsScene.cpp           |  76 ---
+ src/VCX/Labs/4-Final/AngryBirdsScene.h             |  22 -
+ src/VCX/Labs/4-Final/CaseAngryBirds3D.cpp          | 458 ++++++++++++++++--
+ src/VCX/Labs/4-Final/CaseAngryBirds3D.h            |  45 +-
+ src/VCX/Labs/4-Final/Config.h                      |   7 +
+ src/VCX/Labs/4-Final/Levels/ILevel.h               |  50 ++
+ .../Labs/4-Final/Levels/Level01_ClassicTower.cpp   |  35 ++
+ src/VCX/Labs/4-Final/Levels/Level01_ClassicTower.h |  13 +
+ .../Labs/4-Final/Levels/Level02_StoneCastle.cpp    |  33 ++
+ src/VCX/Labs/4-Final/Levels/Level02_StoneCastle.h  |  13 +
+ .../Labs/4-Final/Levels/Level03_TargetPractice.cpp |  32 ++
+ .../Labs/4-Final/Levels/Level03_TargetPractice.h   |  13 +
+ src/VCX/Labs/4-Final/Levels/Level04_Moat.cpp       |  42 ++
+ src/VCX/Labs/4-Final/Levels/Level04_Moat.h         |  14 +
+ src/VCX/Labs/4-Final/Levels/Level05_DamBreak.cpp   |  51 ++
+ src/VCX/Labs/4-Final/Levels/Level05_DamBreak.h     |  15 +
+ src/VCX/Labs/4-Final/Levels/LevelCommon.h          |  35 ++
+ src/VCX/Labs/4-Final/Levels/LevelRegistry.cpp      |  19 +
+ src/VCX/Labs/4-Final/Levels/LevelRegistry.h        |  12 +
+ src/VCX/Labs/4-Final/Physics/Coupling.cpp          | 192 ++++++++
+ src/VCX/Labs/4-Final/Physics/Coupling.h            |  21 +
+ src/VCX/Labs/4-Final/Physics/FluidSolver.h         | 533 +++++++++++++++++++++
+ src/VCX/Labs/4-Final/Physics/FluidWorld.h          | 116 +++++
+ .../RigidWorld.cpp}                                |  77 ++-
+ .../{AngryBirdsPhysics.h => Physics/RigidWorld.h}  |  11 +-
+ src/VCX/Labs/4-Final/World.h                       |  55 +++
+ xmake.lua                                          |   7 +-
+ "\346\212\245\345\221\212.md"                      | 151 ++++++
+ 33 files changed, 2019 insertions(+), 184 deletions(-)
+
+commit 5ad3bbe2c9d5f3458fb08db8a0eb11cb45d14923
+Author: Shoxquach <atwr1292@stu.pku.edu.cn>
+Date:   Sun Jun 7 15:14:07 2026 +0800
+
+    Initial commit with basic physics, simple scenes and rendering
+
+ .clang-format                              | 152 +++++
+ .gitignore                                 |  11 +
+ LICENSE                                    |  21 +
+ assets/fonts/Ubuntu.ttf                    | Bin 0 -> 279384 bytes
+ assets/fonts/UbuntuMono.ttf                | Bin 0 -> 205748 bytes
+ assets/images/ground.jpg                   | Bin 0 -> 339354 bytes
+ assets/images/lab0-case1.png               | Bin 0 -> 42293 bytes
+ assets/images/lab0-case2.png               | Bin 0 -> 58986 bytes
+ assets/images/lab0-case3.png               | Bin 0 -> 144187 bytes
+ assets/images/lab0-case4.png               | Bin 0 -> 110155 bytes
+ assets/images/lab0-case5.png               | Bin 0 -> 193874 bytes
+ assets/images/vcl-logo-16x16.png           | Bin 0 -> 1985 bytes
+ assets/images/vcl-logo-256x256.png         | Bin 0 -> 4533 bytes
+ assets/images/vcl-logo-32x32.png           | Bin 0 -> 2203 bytes
+ assets/images/vcl-logo-48x48.png           | Bin 0 -> 2439 bytes
+ assets/scenes/fluid/fluid.yaml             |  21 +
+ assets/shaders/flat.frag                   |  11 +
+ assets/shaders/flat.vert                   |  14 +
+ assets/shaders/fluid.frag                  |  77 +++
+ assets/shaders/fluid.vert                  |  36 ++
+ assets/shaders/phong.frag                  |  94 ++++
+ assets/shaders/sphere_phong.vert           |  36 ++
+ assets/shaders/triangle.frag               |   9 +
+ assets/shaders/triangle.vert               |  11 +
+ command.txt                                |   1 +
+ src/3rdparty/imgui_impl_glfw.cpp           | 663 ++++++++++++++++++++++
+ src/3rdparty/imgui_impl_glfw.h             |  46 ++
+ src/3rdparty/imgui_impl_opengl3.cpp        | 871 +++++++++++++++++++++++++++++
+ src/3rdparty/imgui_impl_opengl3.h          |  55 ++
+ src/3rdparty/imgui_impl_opengl3_loader.h   | 786 ++++++++++++++++++++++++++
+ src/3rdparty/scope.hpp                     | 574 +++++++++++++++++++
+ src/3rdparty/stb_image.cpp                 |   4 +
+ src/3rdparty/tiny_obj_loader.cpp           |   4 +
+ src/VCX/Assets/bundled.h                   |  29 +
+ src/VCX/Engine/Async.hpp                   |  67 +++
+ src/VCX/Engine/Camera.hpp                  |  31 +
+ src/VCX/Engine/Formats.hpp                 | 136 +++++
+ src/VCX/Engine/GL/Frame.hpp                | 178 ++++++
+ src/VCX/Engine/GL/Program.cpp              |  37 ++
+ src/VCX/Engine/GL/Program.h                |  36 ++
+ src/VCX/Engine/GL/RenderItem.cpp           |  70 +++
+ src/VCX/Engine/GL/RenderItem.h             |  68 +++
+ src/VCX/Engine/GL/Sampler.hpp              |  59 ++
+ src/VCX/Engine/GL/Shader.cpp               |  57 ++
+ src/VCX/Engine/GL/Shader.h                 |  29 +
+ src/VCX/Engine/GL/Texture.hpp              | 187 +++++++
+ src/VCX/Engine/GL/UniformBlock.hpp         |  32 ++
+ src/VCX/Engine/GL/VertexLayout.hpp         | 104 ++++
+ src/VCX/Engine/GL/resource.hpp             | 190 +++++++
+ src/VCX/Engine/GL/uniform.hpp              | 137 +++++
+ src/VCX/Engine/Scene.cpp                   |  14 +
+ src/VCX/Engine/Scene.h                     |  82 +++
+ src/VCX/Engine/Sphere.cpp                  |  54 ++
+ src/VCX/Engine/Sphere.h                    |  26 +
+ src/VCX/Engine/SurfaceMesh.cpp             |  83 +++
+ src/VCX/Engine/SurfaceMesh.h               |  40 ++
+ src/VCX/Engine/TextureND.hpp               | 121 ++++
+ src/VCX/Engine/app.cpp                     | 212 +++++++
+ src/VCX/Engine/app.h                       |  69 +++
+ src/VCX/Engine/loader.cpp                  | 442 +++++++++++++++
+ src/VCX/Engine/loader.h                    |  21 +
+ src/VCX/Engine/math.hpp                    |  30 +
+ src/VCX/Engine/prelude.hpp                 |  30 +
+ src/VCX/Engine/type.hpp                    |  41 ++
+ src/VCX/Examples/ImGui/main.cpp            |  35 ++
+ src/VCX/Examples/Triangle/main.cpp         |  72 +++
+ src/VCX/Labs/4-Final/AngryBirdsPhysics.cpp | 460 +++++++++++++++
+ src/VCX/Labs/4-Final/AngryBirdsPhysics.h   |  80 +++
+ src/VCX/Labs/4-Final/AngryBirdsScene.cpp   |  76 +++
+ src/VCX/Labs/4-Final/AngryBirdsScene.h     |  22 +
+ src/VCX/Labs/4-Final/App.cpp               |  11 +
+ src/VCX/Labs/4-Final/App.h                 |  28 +
+ src/VCX/Labs/4-Final/CaseAngryBirds3D.cpp  | 435 ++++++++++++++
+ src/VCX/Labs/4-Final/CaseAngryBirds3D.h    |  84 +++
+ src/VCX/Labs/4-Final/main.cpp              |  13 +
+ src/VCX/Labs/Common/FlyCameraManager.cpp   | 131 +++++
+ src/VCX/Labs/Common/FlyCameraManager.h     |  66 +++
+ src/VCX/Labs/Common/ICase.h                |  29 +
+ src/VCX/Labs/Common/ImGuiHelper.cpp        |  76 +++
+ src/VCX/Labs/Common/ImGuiHelper.h          |  26 +
+ src/VCX/Labs/Common/ImageRGB.cpp           |  42 ++
+ src/VCX/Labs/Common/ImageRGB.h             |  13 +
+ src/VCX/Labs/Common/OrbitCameraManager.cpp | 193 +++++++
+ src/VCX/Labs/Common/OrbitCameraManager.h   |  74 +++
+ src/VCX/Labs/Common/UI.cpp                 | 326 +++++++++++
+ src/VCX/Labs/Common/UI.h                   |  68 +++
+ src/VCX/Labs/Scene/Content.cpp             |  76 +++
+ src/VCX/Labs/Scene/Content.h               |  12 +
+ src/VCX/Labs/Scene/SceneObject.cpp         | 157 ++++++
+ src/VCX/Labs/Scene/SceneObject.h           |  77 +++
+ xmake.lua                                  | 104 ++++
+ 91 files changed, 8995 insertions(+)
