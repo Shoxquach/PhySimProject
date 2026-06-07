@@ -54,7 +54,7 @@ namespace VCX::Labs::Final {
         BuildStaticGeometry();
         BuildSphereGeometry();
 
-        // 풀스크린 하늘 사각형 (한 번만 업로드).
+        // 全屏天空四边形 (只上传一次).
         std::vector<glm::vec3> const skyVerts = {
             { -1.f, -1.f, 0.f }, {  1.f, -1.f, 0.f }, {  1.f,  1.f, 0.f },
             { -1.f, -1.f, 0.f }, {  1.f,  1.f, 0.f }, { -1.f,  1.f, 0.f },
@@ -107,7 +107,7 @@ namespace VCX::Labs::Final {
             ResetScene();
         }
 
-        // 발사체 선택 (레벨이 여러 종류를 허용할 때만).
+        // 选择发射体 (仅当关卡允许多种时).
         std::vector<ShotType> const shots = _levels[_levelIndex]->Shots();
         if (shots.size() > 1) {
             std::vector<char const *> shotNames;
@@ -118,7 +118,7 @@ namespace VCX::Labs::Final {
             }
             if (ImGui::Combo("Projectile", &sel, shotNames.data(), int(shotNames.size()))) {
                 _currentShot = shots[sel];
-                if (!_birdLaunched) {   // 아직 안 쐈으면 대기 중인 발사체를 즉시 교체
+                if (!_birdLaunched) {   // 若尚未发射, 立即替换待发射体
                     for (auto & bd : _world.Rigid.Bodies) {
                         if (bd.Kind == BodyKind::Bird || bd.Kind == BodyKind::WaterBalloon) bd.IsAlive = false;
                     }
@@ -196,9 +196,9 @@ namespace VCX::Labs::Final {
         if (!_pause) {
             int const steps = std::max(_substeps, 1);
             for (int i = 0; i < steps; ++i) {
-                StepSimulation(frameDt / float(steps));   // 강체 + 부력 (substep)
+                StepSimulation(frameDt / float(steps));   // 刚体 + 浮力 (子步)
             }
-            _world.StepFluid(frameDt);                      // 유체는 프레임당 한 번
+            _world.StepFluid(frameDt);                      // 流体每帧一次
         }
 
         _cameraManager.Update(_camera);
@@ -233,16 +233,16 @@ namespace VCX::Labs::Final {
         _world.Reset();
         _anchor = level.Anchor();
         _dragPosition = _anchor;
-        level.Setup(_world, _breakThreshold);          // 환경/타깃 배치 (유체 켜짐 포함)
+        level.Setup(_world, _breakThreshold);          // 布置环境/目标 (含开启流体)
 
-        // 현재 발사체가 이 레벨에서 가능한지 확인 후 보정.
+        // 校正当前发射体在本关是否可用.
         std::vector<ShotType> const shots = level.Shots();
         if (std::find(shots.begin(), shots.end(), _currentShot) == shots.end()) {
             _currentShot = shots.empty() ? ShotType::Bird : shots.front();
         }
         _birdIndex = SpawnProjectile();
 
-        // 점수/발사 상태 초기화 + 현재 파괴 가능 개수 기록.
+        // 重置分数/发射状态 + 记录当前可破坏数量.
         _score = 0;
         _shotsUsed = 0;
         _projRestTimer = 0.f;
@@ -257,14 +257,14 @@ namespace VCX::Labs::Final {
     }
 
     void CaseAngryBirds3D::StepSimulation(float dt) {
-        // 발사 전 발사체는 새총에 고정 (중력에 떨어지지 않게, 항상 보이게).
-        // 드래그 중이면 드래그 위치로, 아니면 anchor 로.
+        // 发射前把发射体固定在弹弓上 (不被重力下坠, 始终可见).
+        // 拖拽中则用拖拽位置, 否则用 anchor.
         int const pinIndex = (!_birdLaunched) ? _birdIndex : -1;
         glm::vec3 const pinPos = _dragging ? _dragPosition : _anchor;
         _world.Step(dt, pinIndex, pinPos);
         _levels[_levelIndex]->Tick(_world, dt);
 
-        // 살아있는 발사체(구) 찾기.
+        // 查找存活的发射体(球).
         _birdIndex = -1;
         for (int i = 0; i < int(_world.Rigid.Bodies.size()); ++i) {
             RigidBody const & b = _world.Rigid.Bodies[i];
@@ -274,7 +274,7 @@ namespace VCX::Labs::Final {
             }
         }
 
-        // 물풍선: 충돌하거나 물에 닿으면 터져서 유체를 분출.
+        // 水球: 碰撞或入水时爆裂并喷出流体.
         if (_birdLaunched && _birdIndex >= 0 && _world.Rigid.Bodies[_birdIndex].Kind == BodyKind::WaterBalloon) {
             RigidBody const & proj = _world.Rigid.Bodies[_birdIndex];
             bool const inWater = _world.Fluid && _world.Fluid->InsideTankXZ(proj.Position)
@@ -285,7 +285,7 @@ namespace VCX::Labs::Final {
             }
         }
 
-        // 자동 재장전: 발사한 발사체가 사라졌거나 충분히 멈추면 새것을 장전.
+        // 自动装填: 已发射体消失或充分静止后装填新的.
         if (_birdLaunched) {
             if (_birdIndex < 0) {
                 ReloadProjectile();
@@ -295,19 +295,19 @@ namespace VCX::Labs::Final {
                 if (speed < 0.6f * WorldScale) _projRestTimer += dt;
                 else _projRestTimer = 0.f;
                 if (_projRestTimer > 0.8f) {
-                    _world.Rigid.Bodies[_birdIndex].IsAlive = false;  // 멈춘 발사체 회수
+                    _world.Rigid.Bodies[_birdIndex].IsAlive = false;  // 回收已静止的发射体
                     ReloadProjectile();
                     _birdIndex = -1;
                 }
             }
         } else if (_birdIndex < 0) {
-            _birdIndex = SpawnProjectile();   // 대기 발사체가 없으면 보충
+            _birdIndex = SpawnProjectile();   // 若没有待发射体则补充
         }
 
         UpdateScore();
         _gameState = _levels[_levelIndex]->Status(_world);
         if (_gameState == GameState::Won && !_wonAwarded) {
-            _score += 1000;        // 클리어 보너스
+            _score += 1000;        // 过关奖励
             _wonAwarded = true;
         }
     }
@@ -337,7 +337,7 @@ namespace VCX::Labs::Final {
         if (_currentShot == ShotType::WaterBalloon) {
             return _world.Rigid.AddWaterBalloon(_anchor);
         }
-        return _world.Rigid.AddBird(_anchor);   // Bird/Jelly(미구현) 기본은 새
+        return _world.Rigid.AddBird(_anchor);   // Bird/Jelly(未实现) 默认用小鸟
     }
 
     bool CaseAngryBirds3D::ProjectileIsBalloon() const {
@@ -349,7 +349,7 @@ namespace VCX::Labs::Final {
         RigidBody & b = _world.Rigid.Bodies[index];
         glm::vec3 const pos = b.Position;
         glm::vec3 const vel = b.Velocity;
-        b.IsAlive = false;   // 풍선 제거
+        b.IsAlive = false;   // 移除水球
 
         if (_world.Fluid && _world.Fluid->InsideTankXZ(pos)) {
             int const count = 180;
@@ -371,7 +371,7 @@ namespace VCX::Labs::Final {
         bird.Position = _dragPosition;
         bird.Velocity = pull * _powerScale;
         if (ProjectileIsBalloon()) {
-            bird.AngularVel = glm::vec3(0.f);   // 풍선은 거의 안 구름
+            bird.AngularVel = glm::vec3(0.f);   // 水球几乎不旋转
             bird.LifeTime   = 8.f;
         } else {
             bird.AngularVel = glm::vec3(0.f, 0.f, -glm::length(pull) * 8.f);
@@ -380,7 +380,7 @@ namespace VCX::Labs::Final {
         _birdLaunched = true;
         _projRestTimer = 0.f;
         _shotsUsed++;
-        // _gameStarted 는 유지 → 재장전 후 바로 다시 드래그 가능.
+        // 保持 _gameStarted → 装填后可立即再次拖拽.
     }
 
     void CaseAngryBirds3D::HandleSlingshotInput(ImVec2 const & mousePos) {
@@ -635,7 +635,7 @@ namespace VCX::Labs::Final {
     }
 
     void CaseAngryBirds3D::DrawSky() {
-        // 깊이 끄고 풀스크린 그라데이션 한 장.
+        // 关闭深度, 画一张全屏渐变.
         glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
         _skyProgram.GetUniforms().SetByName("u_Top", glm::vec3(.33f, .55f, .85f));
@@ -646,7 +646,7 @@ namespace VCX::Labs::Final {
     }
 
     void CaseAngryBirds3D::DrawScenery() {
-        // 그리기 전용 임시 바디 헬퍼 (물리에는 영향 없음). 좌표는 디자인 단위 * WorldScale.
+        // 仅绘制用的临时刚体 (不参与物理). 坐标为设计单位 * WorldScale.
         auto box = [&](glm::vec3 pos, glm::vec3 half, glm::vec3 col) {
             RigidBody b;
             b.Position = pos * WorldScale;
@@ -665,12 +665,12 @@ namespace VCX::Labs::Final {
             DrawSphere(b);
         };
 
-        // 먼 언덕 (납작하지 않은 큰 구 — 지평선 위로 둥근 능선).
+        // 远山 (大球 — 在地平线上形成圆润山脊).
         sphere({ -3.f, -4.0f, -13.f },  9.5f, glm::vec3(.30f, .52f, .28f));
         sphere({ 13.f, -4.5f, -15.f }, 11.0f, glm::vec3(.25f, .47f, .24f));
         sphere({  5.f, -5.0f, -20.f }, 13.0f, glm::vec3(.22f, .42f, .26f));
 
-        // 구름.
+        // 云.
         glm::vec3 const cloud(.96f, .98f, 1.f);
         auto puff = [&](glm::vec3 c) {
             sphere(c,                          1.5f, cloud);
@@ -681,7 +681,7 @@ namespace VCX::Labs::Final {
         puff({  4.f, 12.0f, -9.f });
         puff({ 12.f,  9.5f, -3.f });
 
-        // 나무 (줄기 + 잎).
+        // 树 (树干 + 树叶).
         auto tree = [&](glm::vec3 base) {
             box(base + glm::vec3(0.f, .85f, 0.f), glm::vec3(.18f, .85f, .18f), glm::vec3(.40f, .26f, .13f));
             sphere(base + glm::vec3(0.f, 2.0f, 0.f), 1.0f, glm::vec3(.20f, .48f, .22f));
@@ -706,13 +706,13 @@ namespace VCX::Labs::Final {
             b.Scale    = 1.f;
             DrawSphere(b);
         };
-        // 흰자 + 눈동자.
+        // 眼白 + 瞳孔.
         eye(+1.f, glm::vec3(1.f), .30f, 0.f);
         eye(-1.f, glm::vec3(1.f), .30f, 0.f);
         eye(+1.f, glm::vec3(.04f), .15f, .12f);
         eye(-1.f, glm::vec3(.04f), .15f, .12f);
 
-        // 부리.
+        // 喙.
         RigidBody beak;
         beak.Position = body.Position + fwd * (r * .92f) - up * (r * .08f);
         beak.HalfSize = glm::vec3(r * .26f, r * .16f, r * .18f);
@@ -726,7 +726,7 @@ namespace VCX::Labs::Final {
         if (!_world.Fluid) return;
         FluidWorld const & fluid = *_world.Fluid;
 
-        // 물 입자를 둥근 점으로 렌더. 색은 솔버가 계산한 속도 기반 색(파랑→청록→노랑→빨강).
+        // 用圆点渲染水粒子. 颜色取求解器算出的速度着色(蓝→青→黄→红).
         int const n = fluid.ParticleCount();
         if (n > 0) {
             std::vector<FluidVertex> verts;
@@ -740,7 +740,7 @@ namespace VCX::Labs::Final {
             glPointSize(1.f);
         }
 
-        // 물탱크(해자) 윤곽선 12개 모서리.
+        // 水箱(护城河)轮廓的 12 条棱.
         glm::vec3 const lo = fluid.BoxMin();
         glm::vec3 const hi = fluid.BoxMax();
         glm::vec3 const edgeColor(.2f, .5f, .7f);

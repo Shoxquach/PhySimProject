@@ -1,3 +1,58 @@
+commit 2e523cfe2a5027868b7bb60143b327aca2dc2390
+Author: jung <jung@jungui-MacBookPro.local>
+Date:   Mon Jun 8 00:02:10 2026 +0800
+
+    style: 统一代码注释规范
+    
+    Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+ assets/shaders/point.frag                          |  4 +-
+ lab4_log.txt                                       | 65 ++++++++++++++++++++++
+ src/VCX/Labs/4-Final/CaseAngryBirds3D.cpp          | 58 +++++++++----------
+ src/VCX/Labs/4-Final/CaseAngryBirds3D.h            | 16 +++---
+ src/VCX/Labs/4-Final/Config.h                      |  4 +-
+ src/VCX/Labs/4-Final/Levels/ILevel.h               | 22 ++++----
+ .../Labs/4-Final/Levels/Level01_ClassicTower.cpp   |  8 +--
+ src/VCX/Labs/4-Final/Levels/Level01_ClassicTower.h |  2 +-
+ .../Labs/4-Final/Levels/Level02_StoneCastle.cpp    |  8 +--
+ src/VCX/Labs/4-Final/Levels/Level02_StoneCastle.h  |  2 +-
+ .../Labs/4-Final/Levels/Level03_TargetPractice.cpp |  6 +-
+ .../Labs/4-Final/Levels/Level03_TargetPractice.h   |  2 +-
+ src/VCX/Labs/4-Final/Levels/Level04_Moat.cpp       | 10 ++--
+ src/VCX/Labs/4-Final/Levels/Level04_Moat.h         |  4 +-
+ src/VCX/Labs/4-Final/Levels/Level05_DamBreak.cpp   | 14 ++---
+ src/VCX/Labs/4-Final/Levels/Level05_DamBreak.h     |  4 +-
+ src/VCX/Labs/4-Final/Levels/LevelCommon.h          |  6 +-
+ src/VCX/Labs/4-Final/Levels/LevelRegistry.h        |  4 +-
+ src/VCX/Labs/4-Final/Physics/Coupling.cpp          | 26 ++++-----
+ src/VCX/Labs/4-Final/Physics/Coupling.h            | 14 ++---
+ src/VCX/Labs/4-Final/Physics/FluidSolver.h         | 22 ++++----
+ src/VCX/Labs/4-Final/Physics/FluidWorld.h          | 28 +++++-----
+ src/VCX/Labs/4-Final/Physics/RigidWorld.cpp        |  8 +--
+ src/VCX/Labs/4-Final/Physics/RigidWorld.h          |  2 +-
+ src/VCX/Labs/4-Final/World.h                       | 24 ++++----
+ 25 files changed, 214 insertions(+), 149 deletions(-)
+
+commit 0be418506ec763e250f6e2ba5b00ef1b6b2aebc1
+Author: galbi-joa <160612025+galbi-joa@users.noreply.github.com>
+Date:   Sun Jun 7 22:20:00 2026 +0800
+
+    Update 报告.md
+
+ "\346\212\245\345\221\212.md" | 13 +------------
+ 1 file changed, 1 insertion(+), 12 deletions(-)
+
+commit 99c75dd1234a08827a21242d52b107a0c0ac15ea
+Author: jung <jung@jungui-MacBookPro.local>
+Date:   Sun Jun 7 22:04:46 2026 +0800
+
+    docs: 添加 Git 提交记录 lab4_log.txt
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+
+ lab4_log.txt | 143 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 143 insertions(+)
+
 commit 70d7145181872584811f450559cdaceead28cbac
 Author: jung <jung@jungui-MacBookPro.local>
 Date:   Sun Jun 7 22:04:46 2026 +0800

@@ -1,8 +1,8 @@
 #pragma once
 
-// Lab2 에서 구현한 FLIP/PIC 유체 솔버를 그대로 이식한 것.
-// 좌표계는 [-0.5, 0.5]^3 단위 정육면체(tank). 월드 변환은 FluidWorld 가 담당한다.
-// 원본 대비 변경점: namespace 정리, setupScene -> setup(res, relWater) 로 물 영역 파라미터화.
+// 直接移植自 Lab2 实现的 FLIP/PIC 流体求解器.
+// 坐标系为 [-0.5, 0.5]^3 单位立方体(tank). 世界变换由 FluidWorld 负责.
+// 相对原版改动: 整理 namespace, setupScene -> setup(res, relWater) 参数化水体区域.
 
 #include <algorithm>
 #include <cmath>
@@ -40,9 +40,9 @@ namespace VCX::Labs::Final {
         std::vector<float> m_particleDensity;
         float              m_particleRestDensity { 0.0f };
 
-        // --- two-way 커플링용 ---
-        std::vector<float>     m_sStatic;   // 정적 벽 마스크 (매 스텝 복원의 기준)
-        std::vector<glm::vec3> m_solidVel;  // 동적 solid 셀의 속도 (local 단위/초)
+        // --- 用于 two-way 耦合 ---
+        std::vector<float>     m_sStatic;   // 静态墙体掩码 (每步复原的基准)
+        std::vector<glm::vec3> m_solidVel;  // 动态 solid 单元的速度 (local 单位/秒)
 
         glm::vec3 gravity { 0.0f, -9.81f, 0.0f };
 
@@ -326,8 +326,8 @@ namespace VCX::Labs::Final {
                             int id = cellId(i, j, k);
                             for (int d = 0; d < 3; d++) {
                                 if (isValidVelocity(i, j, k, d)) continue;
-                                // 정적 벽이면 0, 움직이는 solid 면이면 그 solid 속도를 부여
-                                // (이동 경계 조건 → 압력 투영이 물을 밀어냄).
+                                // 静态墙为0, 运动 solid 面则赋予该 solid 的速度
+                                // (移动边界条件 → 压力投影把水推开).
                                 float sv = 0.0f;
                                 if (m_s[id] == 0.0f) {
                                     sv = m_solidVel[id][d];
@@ -433,7 +433,7 @@ namespace VCX::Labs::Final {
             }
         }
 
-        // 매 스텝 동적 solid 마스크/속도 초기화 (정적 벽만 남김).
+        // 每步重置动态 solid 掩码/速度 (只保留静态墙).
         void beginDynamicSolids() {
             m_s = m_sStatic;
             std::fill(m_solidVel.begin(), m_solidVel.end(), glm::vec3(0.0f));
@@ -462,7 +462,7 @@ namespace VCX::Labs::Final {
             updateParticleColors();
         }
 
-        // res: 격자 해상도, relWater: tank 대비 물이 차지하는 비율(0~1).
+        // res: 网格分辨率, relWater: 水体占 tank 的比例(0~1).
         void setup(int res, glm::vec3 relWater) {
             glm::vec3 tank(1.0f);
 
@@ -527,7 +527,7 @@ namespace VCX::Labs::Final {
                 }
             }
 
-            m_sStatic = m_s;   // 정적 벽 마스크 보관 (two-way 매 스텝 복원용)
+            m_sStatic = m_s;   // 保存静态墙掩码 (two-way 每步复原用)
         }
     };
 } // namespace VCX::Labs::Final

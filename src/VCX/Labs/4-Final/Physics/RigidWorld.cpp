@@ -109,7 +109,7 @@ namespace VCX::Labs::Final {
     int RigidWorld::AddBird(glm::vec3 const & anchor) {
         RigidBody bird;
         bird.Kind = BodyKind::Bird;
-        bird.Mass = 1.4f * WorldScale * WorldScale * WorldScale; // 부피(∝S^3)에 맞춰 질량 스케일 → 블록과의 질량비 유지
+        bird.Mass = 1.4f * WorldScale * WorldScale * WorldScale; // 按体积(∝S^3)缩放质量 → 保持与方块的质量比
         bird.InvMass = 1.f / bird.Mass;
         bird.Position = anchor;
         bird.Radius = BirdRadius;
@@ -138,7 +138,7 @@ namespace VCX::Labs::Final {
         b.Radius = BirdRadius * 1.1f;
         b.HalfSize = glm::vec3(b.Radius);
         b.Color = glm::vec3(.2f, .5f, .95f);
-        b.Breakable = false;   // 터짐(burst)은 Case 가 처리한다
+        b.Breakable = false;   // 爆裂(burst)由 Case 处理
         b.Toughness = 100.f;
         b.Age = 0.f;
         b.LifeTime = -1.f;
@@ -151,7 +151,7 @@ namespace VCX::Labs::Final {
     }
 
     int RigidWorld::AddBox(BodyKind kind, glm::vec3 position, glm::vec3 halfSize, float density, glm::vec3 color, float toughness, bool breakable) {
-        // 레벨은 디자인 단위로 배치하고, 무대 배율은 여기서 한 번에 적용한다.
+        // 关卡用设计单位布置, 舞台缩放在此统一应用.
         position *= WorldScale;
         halfSize *= WorldScale;
         RigidBody body;
@@ -428,7 +428,7 @@ namespace VCX::Labs::Final {
         if (!ba.IsAlive || !bb.IsAlive || (ba.IsStatic && bb.IsStatic)) return false;
         if (ba.Kind == BodyKind::Fragment || bb.Kind == BodyKind::Fragment) return false;
 
-        // FCL 이 모양(구/박스)을 Kind 로 판별하므로 구-구/구-박스/박스-박스 모두 한 경로로 처리.
+        // FCL 用 Kind 区分形状(球/盒), 故 球-球/球-盒/盒-盒 统一处理.
         if (!QueryFclContact(ba, bb, contact)) return false;
         contact.A = a;
         contact.B = b;

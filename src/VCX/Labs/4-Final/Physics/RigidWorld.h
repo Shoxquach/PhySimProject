@@ -39,7 +39,7 @@ namespace VCX::Labs::Final {
         float     LifeTime   = -1.f;
         float     Scale      = 1.f;
         glm::mat3 InvInertiaLocal = glm::mat3(0.f);
-        float     LastImpact = 0.f;   // 이번 스텝 최대 충격 (물풍선 터짐 판정용)
+        float     LastImpact = 0.f;   // 本步最大冲量 (用于水球爆裂判定)
     };
 
     struct Contact {

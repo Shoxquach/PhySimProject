@@ -6,7 +6,7 @@
 #include "Labs/4-Final/World.h"
 
 namespace VCX::Labs::Final {
-    // 모든 레벨이 공유하는 재질 팔레트. (원래 각 씬 함수에 중복돼 있던 값)
+    // 所有关卡共享的材质调色板. (原本在各场景函数中重复)
     namespace Mat {
         inline glm::vec3 const Wood   { .62f, .38f, .16f };
         inline glm::vec3 const Glass  { .35f, .72f, .95f };
@@ -19,7 +19,7 @@ namespace VCX::Labs::Final {
         constexpr float DensTarget = .6f;
     }
 
-    // 살아있는 Target 블록 개수.
+    // 存活的 Target 方块数量.
     inline int CountAliveTargets(World const & world) {
         int n = 0;
         for (auto const & b : world.Rigid.Bodies) {
@@ -28,7 +28,7 @@ namespace VCX::Labs::Final {
         return n;
     }
 
-    // "모든 타깃을 파괴하면 승리" 라는 공통 승패 규칙.
+    // "摧毁所有目标即胜利"的通用胜负规则.
     inline GameState TargetsClearedStatus(World const & world) {
         return CountAliveTargets(world) == 0 ? GameState::Won : GameState::Playing;
     }

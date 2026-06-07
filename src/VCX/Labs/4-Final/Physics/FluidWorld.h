@@ -9,20 +9,20 @@
 #include "Labs/4-Final/Physics/FluidSolver.h"
 
 namespace VCX::Labs::Final {
-    // FLIP 솔버(단위 정육면체 공간)를 월드 공간의 한 박스(tank)에 매핑하는 래퍼.
+    // 把 FLIP 求解器(单位立方体空间)映射到世界空间一个盒子(tank)的封装.
     //   world = Center + local * Size,  local in [-0.5, 0.5]^3
     class FluidWorld {
     public:
         FluidSolver Solver;
-        glm::vec3   Center { 0.f };  // tank 중심 (월드)
-        glm::vec3   Size   { 1.f };  // tank 크기 (월드)
-        float       Density = 1.0f;  // 부력 계산용 기준 밀도 (블록 density 와 같은 단위)
+        glm::vec3   Center { 0.f };  // tank 中心 (世界)
+        glm::vec3   Size   { 1.f };  // tank 大小 (世界)
+        float       Density = 1.0f;  // 浮力计算用的基准密度 (与方块 density 同单位)
 
-        // 컬럼별 수면 local-y (부력용 height field). 크기 = X * Z.
+        // 每列水面 local-y (浮力用 height field). 大小 = X * Z.
         std::vector<float> SurfaceLocalY;
 
         void Init(int res, glm::vec3 center, glm::vec3 size, glm::vec3 relWater) {
-            Center = center * WorldScale;   // tank 도 무대 배율로 확대
+            Center = center * WorldScale;   // tank 也按舞台缩放放大
             Size   = size * WorldScale;
             Solver.setup(res, relWater);
             UpdateHeightField();
@@ -51,24 +51,24 @@ namespace VCX::Labs::Final {
             return l.x >= -0.5f && l.x <= 0.5f && l.z >= -0.5f && l.z <= 0.5f;
         }
 
-        // 셀 (i,j,k) 중심의 월드 좌표.
+        // 单元 (i,j,k) 中心的世界坐标.
         glm::vec3 CellCenterWorld(int i, int j, int k) const {
             glm::vec3 local = (glm::vec3(i, j, k) + 0.5f) * Solver.m_h - 0.5f;
             return Center + local * Size;
         }
 
-        // ---- two-way: 강체 -> 유체 ----
+        // ---- two-way: 刚体 -> 流体 ----
         void BeginDynamicSolids() { Solver.beginDynamicSolids(); }
 
         void MarkSolidCell(int i, int j, int k, glm::vec3 const & worldVel) {
             if (i < 0 || i >= Solver.m_iCellX || j < 0 || j >= Solver.m_iCellY || k < 0 || k >= Solver.m_iCellZ) return;
             int const id = Solver.cellId(i, j, k);
-            Solver.m_s[id] = 0.0f;                  // solid 로 마킹 (물 못 지나감)
-            // 경계 속도 (local 단위). 폭주 방지로 클램프.
+            Solver.m_s[id] = 0.0f;                  // 标记为 solid (水无法通过)
+            // 边界速度 (local 单位). 为防发散做 clamp.
             Solver.m_solidVel[id] = glm::clamp(worldVel / Size, glm::vec3(-8.f), glm::vec3(8.f));
         }
 
-        // ---- 부력용 수면 질의 ----
+        // ---- 浮力用的水面查询 ----
         float SurfaceWorldY(float worldX, float worldZ) const {
             glm::vec3 l = WorldToLocal(glm::vec3(worldX, 0.f, worldZ));
             l.x = std::clamp(l.x, -0.5f, 0.5f);
@@ -81,7 +81,7 @@ namespace VCX::Labs::Final {
             return Center.y + ly * Size.y;
         }
 
-        // 월드 좌표에서의 유체 속도 (흐름 항력용). tank 밖이면 0.
+        // 世界坐标处的流体速度 (流动阻力用). tank 外则为0.
         glm::vec3 FlowVelocityWorld(glm::vec3 const & worldP) const {
             glm::vec3 l = WorldToLocal(worldP);
             if (l.x < -0.5f || l.x > 0.5f || l.y < -0.5f || l.y > 0.5f || l.z < -0.5f || l.z > 0.5f)
@@ -91,9 +91,9 @@ namespace VCX::Labs::Final {
             return v * Size;
         }
 
-        // ---- 물풍선: 런타임 입자 추가 ----
+        // ---- 水球: 运行时添加粒子 ----
         void AddParticleWorld(glm::vec3 const & worldPos, glm::vec3 const & worldVel) {
-            if (int(Solver.m_particlePos.size()) >= 24000) return; // 폭주 방지 상한
+            if (int(Solver.m_particlePos.size()) >= 24000) return; // 防爆涨上限
             glm::vec3 local = WorldToLocal(worldPos);
             local = glm::clamp(local, glm::vec3(-0.49f), glm::vec3(0.49f));
             Solver.m_particlePos.push_back(local);

@@ -24,7 +24,7 @@ namespace VCX::Labs::Final {
             return b.Velocity + glm::cross(b.AngularVel, worldP - b.Position);
         }
 
-        // 강체가 부력/유체 결합 대상인지 (파편/정지체 제외).
+        // 该刚体是否为浮力/流体耦合对象 (排除碎片/静止体).
         bool IsCouplingBody(RigidBody const & b) {
             return b.IsAlive && !b.IsStatic && b.Kind != BodyKind::Fragment;
         }
@@ -33,7 +33,7 @@ namespace VCX::Labs::Final {
             return b.Kind == BodyKind::Bird || b.Kind == BodyKind::WaterBalloon;
         }
 
-        // 강체의 월드 AABB 반-범위.
+        // 刚体的世界 AABB 半范围.
         glm::vec3 WorldExtent(RigidBody const & b) {
             if (IsSphere(b)) return glm::vec3(b.Radius);
             glm::mat3 const R = glm::mat3_cast(b.Rotation);
@@ -44,7 +44,7 @@ namespace VCX::Labs::Final {
             return e;
         }
 
-        // worldP 가 강체 내부면 true, 표면점/외향 법선을 돌려준다.
+        // 若 worldP 在刚体内部返回 true, 给出表面点/外向法线.
         bool SurfaceIfInside(RigidBody const & b, glm::vec3 const & worldP, glm::vec3 & surfaceOut, glm::vec3 & normalOut) {
             if (IsSphere(b)) {
                 glm::vec3 d = worldP - b.Position;
@@ -55,7 +55,7 @@ namespace VCX::Labs::Final {
                 normalOut = n;
                 return true;
             }
-            // 박스: 바디 로컬로 변환 후 가장 얕은 축으로 밀어낸다.
+            // 盒子: 转到刚体局部坐标后, 沿最浅的轴推出.
             glm::quat const invq = glm::inverse(b.Rotation);
             glm::vec3 pl = invq * (worldP - b.Position);
             if (std::abs(pl.x) >= b.HalfSize.x || std::abs(pl.y) >= b.HalfSize.y || std::abs(pl.z) >= b.HalfSize.z)
@@ -87,7 +87,7 @@ namespace VCX::Labs::Final {
             RigidBody & b = rigid.Bodies[i];
             if (!IsCouplingBody(b)) continue;
 
-            // 바디 내부 27개 표본점 중 "tank 안 + 수면 아래" 비율 = 잠긴 비율.
+            // 刚体内部27个采样点中"在tank内 + 水面以下"的比例 = 浸没比例.
             int in = 0, total = 0;
             for (int ix = -1; ix <= 1; ++ix)
                 for (int iy = -1; iy <= 1; ++iy)
@@ -105,11 +105,11 @@ namespace VCX::Labs::Final {
             float const bodyDensity = vol > 1e-6f ? b.Mass / vol : 1.f;
             float const ratio = fluid.Density / std::max(bodyDensity, 1e-4f);
 
-            // 부력 가속도 = -(rho_water/rho_body) * frac * Gravity (위로).
+            // 浮力加速度 = -(rho_water/rho_body) * frac * Gravity (向上).
             b.Velocity -= rigid.Gravity * (ratio * frac) * dt;
 
-            // 흐름 항력: 주변 유체 속도로 끌림.
-            //   정지 수면(fv≈0) -> 감쇠처럼 작동, 흐르는 물 -> 강체를 떠밀어 운반.
+            // 流动阻力: 被周围流体速度拖拽.
+            //   静止水面(fv≈0) -> 类似阻尼, 流动的水 -> 推动并运送刚体.
             glm::vec3 const fv = fluid.FlowVelocityWorld(b.Position);
             float const k = std::clamp(2.5f * frac * dt, 0.f, 0.7f);
             b.Velocity += (fv - b.Velocity) * k;
@@ -131,12 +131,12 @@ namespace VCX::Labs::Final {
             glm::vec3 const ext = WorldExtent(b);
             glm::vec3 const aMin = b.Position - ext;
             glm::vec3 const aMax = b.Position + ext;
-            // tank 와 겹치지 않으면 skip.
+            // 与 tank 不相交则跳过.
             if (aMax.x < boxMin.x || aMin.x > boxMax.x ||
                 aMax.y < boxMin.y || aMin.y > boxMax.y ||
                 aMax.z < boxMin.z || aMin.z > boxMax.z) continue;
 
-            // 바디 AABB 를 grid 셀 범위로.
+            // 把刚体 AABB 转为网格单元范围.
             glm::vec3 lmin = fluid.WorldToLocal(aMin);
             glm::vec3 lmax = fluid.WorldToLocal(aMax);
             auto toCell = [](float l, int n) {
@@ -174,12 +174,12 @@ namespace VCX::Labs::Final {
                 glm::vec3 surf, n3;
                 if (!SurfaceIfInside(b, world, surf, n3)) continue;
 
-                world = surf + n3 * 1e-3f;                 // 표면 밖으로
+                world = surf + n3 * 1e-3f;                 // 推到表面之外
                 glm::vec3 bodyVel = BodyVelAt(b, surf);
-                // 법선 성분은 강체 속도, 접선 성분은 입자 속도 유지 (관통 방지 + 물보라).
+                // 法向取刚体速度, 切向保留粒子速度 (防穿透 + 水花).
                 float vn = glm::dot(worldVel, n3);
                 float bn = glm::dot(bodyVel, n3);
-                worldVel += (std::max(bn, vn) - vn) * n3;  // 안쪽으로 파고드는 성분 제거 + 밀어줌
+                worldVel += (std::max(bn, vn) - vn) * n3;  // 去除向内侵入的分量 + 推出
                 moved = true;
             }
 

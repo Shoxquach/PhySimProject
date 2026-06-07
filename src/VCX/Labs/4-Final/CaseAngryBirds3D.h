@@ -74,28 +74,28 @@ namespace VCX::Labs::Final {
         int   _levelIndex        = 0;
         ShotType _currentShot    = ShotType::Bird;
 
-        // 점수 / 발사 관리
+        // 分数 / 发射管理
         int   _score             = 0;
         int   _shotsUsed         = 0;
         int   _prevTargets       = 0;
         int   _prevBlocks        = 0;
-        float _projRestTimer     = 0.f;   // 발사체가 멈춰 있는 시간 (재장전 판정용)
+        float _projRestTimer     = 0.f;   // 发射体静止的时长 (用于装填判定)
         bool  _wonAwarded        = false;
         float _powerScale        = 6.f;
-        float _breakThreshold    = 7.f * WorldScale;   // 충격(속도) 임계도 배율에 맞춤
+        float _breakThreshold    = 7.f * WorldScale;   // 冲量(速度)阈值也按缩放调整
         int   _substeps          = 6;
         glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.35f, 0.f) * WorldScale;
 
         void ResetScene();
         void StepSimulation(float dt);
-        int  SpawnProjectile();           // 현재 선택된 발사체(새/물풍선) 생성
-        void ReloadProjectile();          // 발사 후 새 발사체를 새총에 자동 장전
+        int  SpawnProjectile();           // 生成当前选择的发射体(小鸟/水球)
+        void ReloadProjectile();          // 发射后自动在弹弓上装填新发射体
         void LaunchBird();
-        void BurstBalloon(int index);     // 물풍선 터뜨려 유체 입자 분출
+        void BurstBalloon(int index);     // 引爆水球喷出流体粒子
         bool ProjectileIsBalloon() const;
-        void UpdateScore();               // 파괴된 블록/타깃 점수 집계
+        void UpdateScore();               // 统计被破坏的方块/目标分数
         void HandleSlingshotInput(ImVec2 const & mousePos);
-        void DrawHUD();                   // 화면 상단 점수 오버레이
+        void DrawHUD();                   // 屏幕顶部分数叠加层
 
         void BuildStaticGeometry();
         void BuildSphereGeometry();

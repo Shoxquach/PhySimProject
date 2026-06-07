@@ -9,23 +9,23 @@
 #include "Labs/4-Final/Physics/Coupling.h"
 
 namespace VCX::Labs::Final {
-    // 서브시스템 간 상호작용 on/off 플래그.
-    // 레벨이 Setup()에서 필요한 커플링만 켠다.
+    // 子系统间相互作用的 on/off 开关.
+    // 关卡在 Setup() 中只开启需要的耦合.
     struct CouplingFlags {
-        bool Buoyancy  = false; // (M1) 유체 -> 강체 부력/항력 (one-way)
-        bool FlowSolid = false; // (M2) 강체 -> 유체 solid 경계 마킹 (two-way)
-        bool FluidSoft = false; // (M3) 유체 <-> FEM
+        bool Buoyancy  = false; // (M1) 流体 -> 刚体 浮力/阻力 (单向)
+        bool FlowSolid = false; // (M2) 刚体 -> 流体 solid 边界标记 (双向)
+        bool FluidSoft = false; // (M3) 流体 <-> FEM
     };
 
-    // 모든 물리 서브시스템을 들고, 정해진 순서로 전진시키는 조율자.
+    // 持有所有物理子系统, 按固定顺序推进的调度器.
     //   (M3) std::optional<SoftWorld> Soft;
     class World {
     public:
         RigidWorld                Rigid;
-        std::optional<FluidWorld> Fluid;   // 레벨이 켤 때만 생성 (안 쓰면 비용 0)
+        std::optional<FluidWorld> Fluid;   // 仅当关卡开启时创建 (不用则零开销)
         CouplingFlags             Couple;
 
-        // 강체 한 스텝 (+커플링). 충돌 안정성을 위해 프레임당 여러 번(substep) 호출된다.
+        // 刚体一步 (+耦合). 为碰撞稳定性, 每帧多次(子步)调用.
         void Step(float dt, int draggedIndex, glm::vec3 const & draggedPosition) {
             if (Fluid && Couple.Buoyancy) {
                 Coupling::ApplyBuoyancy(*Fluid, Rigid, dt, draggedIndex);
@@ -33,19 +33,19 @@ namespace VCX::Labs::Final {
             Rigid.Step(dt, draggedIndex, draggedPosition);
         }
 
-        // 유체 한 스텝. 강체보다 무거우므로 프레임당 한 번만 호출한다.
+        // 流体一步. 比刚体重, 故每帧只调用一次.
         void StepFluid(float dt) {
             if (!Fluid) return;
             if (Couple.FlowSolid) {
-                Coupling::MarkRigidSolids(Rigid, *Fluid);        // 강체 -> 유체 경계 (스텝 전)
+                Coupling::MarkRigidSolids(Rigid, *Fluid);        // 刚体 -> 流体 边界 (步进前)
             }
             Fluid->Step(dt);
             if (Couple.FlowSolid) {
-                Coupling::PushParticlesOutOfRigid(Rigid, *Fluid); // 관통 정리 (스텝 후)
+                Coupling::PushParticlesOutOfRigid(Rigid, *Fluid); // 清理穿透 (步进后)
             }
         }
 
-        // 레벨 전환 시 모든 서브시스템 초기화.
+        // 切换关卡时重置所有子系统.
         void Reset() {
             Rigid.Clear();
             Fluid.reset();
