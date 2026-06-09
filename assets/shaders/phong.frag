@@ -32,6 +32,7 @@ uniform bool  u_UseGammaCorrection;
 uniform int   u_AttenuationOrder;
 uniform float u_BumpMappingBlend;
 uniform vec3  u_Color;
+uniform float u_Alpha;
 
 uniform sampler2D u_DiffuseMap;
 uniform sampler2D u_SpecularMap;
@@ -90,5 +91,5 @@ void main() {
         total += Shade(u_Lights[i].Intensity, u_Lights[i].Direction, normal, viewDir, diffuseColor, specularColor, shininess);
     }
     // Gamma correction.
-    f_Color = vec4(u_UseGammaCorrection ? pow(total, vec3(1. / gamma)) : total, 1.);
+    f_Color = vec4(u_UseGammaCorrection ? pow(total, vec3(1. / gamma)) : total, u_Alpha);
 }

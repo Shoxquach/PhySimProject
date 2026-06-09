@@ -9,7 +9,9 @@
 
 #include "Engine/app.h"
 #include "Engine/GL/Texture.hpp"
+#include "Engine/loader.h"
 #include "Labs/Common/ImGuiHelper.h"
+#include "Labs/4-Final/Levels/LevelRegister.h"
 
 namespace VCX::Labs::Final {
     CaseAngryBirds3D::CaseAngryBirds3D():
@@ -37,6 +39,15 @@ namespace VCX::Labs::Final {
         VCX::Engine::Texture2D<VCX::Engine::Formats::RGBA8> diffuse{1, 1};
         diffuse.Fill({ 0xff, 0xff, 0xff, 0xff });
         _diffuseTexture = Engine::GL::UniqueTexture2D(diffuse, 0);
+        _groundTexture = Engine::GL::UniqueTexture2D(
+            Engine::LoadImageRGBA("assets/images/ground.jpg"),
+            {
+                .WrapU     = Engine::GL::WrapMode::Repeat,
+                .WrapV     = Engine::GL::WrapMode::Repeat,
+                .MinFilter = Engine::GL::FilterMode::Trilinear,
+                .MagFilter = Engine::GL::FilterMode::Linear,
+            },
+            0);
 
         VCX::Engine::Texture2D<VCX::Engine::Formats::RGBA8> specular{1, 1};
         specular.Fill({ 0xff, 0xff, 0xff, 0xff });
@@ -56,6 +67,7 @@ namespace VCX::Labs::Final {
         _program.GetUniforms().SetByName("u_UseGammaCorrection", int(false));
         _program.GetUniforms().SetByName("u_AttenuationOrder", 2);
         _program.GetUniforms().SetByName("u_BumpMappingBlend", 0.f);
+        _program.GetUniforms().SetByName("u_Alpha", 1.f);
 
         _lineProgram.GetUniforms().SetByName("u_Color", glm::vec3(1.f));
 
@@ -74,6 +86,8 @@ namespace VCX::Labs::Final {
             "Classic Tower",
             "Stone Castle",
             "Target Practice",
+            "Domino Run",
+            "Boomerang Challenge",
         };
 
         if (ImGui::Combo("Level", &_levelIndex, LevelNames, IM_ARRAYSIZE(LevelNames))) {
@@ -88,17 +102,6 @@ namespace VCX::Labs::Final {
             _pause = !_pause;
         }
 
-        if (ImGui::Button("Reset Camera", ImVec2(250, 0))) {
-            _cameraManager.Reset(_camera);
-        }
-
-        ImGui::Checkbox("Pause", &_pause);
-        ImGui::SliderFloat("Launch Power", &_powerScale, 2.f, 12.f, "%.1f");
-        ImGui::SliderFloat("Break Threshold", &_breakThreshold, 2.f, 18.f, "%.1f");
-        ImGui::SliderFloat("Restitution", &_physics.Restitution, .05f, .8f, "%.2f");
-        ImGui::SliderFloat("Friction", &_physics.Friction, .2f, .98f, "%.2f");
-        ImGui::SliderInt("Substeps", &_substeps, 1, 12);
-
         int aliveBreakables = 0;
         int aliveTargets = 0;
         for (auto const & body : _physics.Bodies) {
@@ -112,16 +115,46 @@ namespace VCX::Labs::Final {
 
         ImGui::Spacing();
         if (!_gameStarted) {
-            ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "Press S to START");
+            ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "Press S to start");
         } else {
-            ImGui::TextColored(ImVec4(0.f, 1.f, 0.f, 1.f), "Game Started - Press S to stop");
-            ImGui::Text("Drag the red bird with left mouse.");
-            ImGui::Text("Release to launch. Right mouse rotates camera.");
+            ImGui::TextColored(ImVec4(0.f, 1.f, 0.f, 1.f), "Ready - drag the bird to launch");
         }
-        ImGui::Text("Press R to reset level.");
-        ImGui::Text("Alive target blocks: %d", aliveTargets);
-        ImGui::Text("Alive breakable blocks: %d", aliveBreakables);
-        ImGui::Text("Fragments created: %d", _physics.FragmentsCreated);
+        if (_birdIndex >= 0 && _birdIndex < int(_physics.Bodies.size()) && _physics.Bodies[_birdIndex].Bird == BirdType::Boomerang) {
+            ImGui::Text("Boomerang: press G before impact");
+        }
+        ImGui::Text("Targets left: %d", aliveTargets);
+
+        ImGui::Spacing();
+        ImGui::Checkbox("Developer Mode", &_developerMode);
+        if (_developerMode) {
+            ImGui::Separator();
+            if (ImGui::Button("Reset Camera", ImVec2(250, 0))) {
+                _cameraManager.Reset(_camera);
+            }
+
+            ImGui::Checkbox("Pause", &_pause);
+            ImGui::SliderFloat("Launch Power", &_powerScale, 2.f, 12.f, "%.1f");
+            ImGui::SliderFloat("Break Threshold", &_breakThreshold, 2.f, 18.f, "%.1f");
+            ImGui::SliderFloat("Restitution", &_physics.Restitution, .05f, .8f, "%.2f");
+            ImGui::SliderFloat("Friction", &_physics.Friction, .2f, .98f, "%.2f");
+            ImGui::SliderInt("Substeps", &_substeps, 1, 12);
+
+            ImGui::Separator();
+            static char const * const SolverTypeNames[] = {
+                "Sequential Impulse",
+                "Constraint-Based (Jacobi)",
+            };
+            int solverType = static_cast<int>(_physics.GetSolverType());
+            if (ImGui::Combo("Solver Type", &solverType, SolverTypeNames, IM_ARRAYSIZE(SolverTypeNames))) {
+                _physics.SetSolverType(static_cast<SolverType>(solverType));
+            }
+            ImGui::Text("Current Solver: %s", SolverTypeNames[solverType]);
+
+            ImGui::Separator();
+            ImGui::Text("Press R to reset level.");
+            ImGui::Text("Alive breakable blocks: %d", aliveBreakables);
+            ImGui::Text("Fragments created: %d", _physics.FragmentsCreated);
+        }
     }
 
     Common::CaseRenderResult CaseAngryBirds3D::OnRender(std::pair<std::uint32_t, std::uint32_t> const desiredSize) {
@@ -134,6 +167,9 @@ namespace VCX::Labs::Final {
         if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
             _gameStarted = false;
             ResetScene();
+        }
+        if (ImGui::IsKeyPressed(ImGuiKey_G, false)) {
+            ActivateBoomerangBird();
         }
 
         float const frameDt = std::min(Engine::GetDeltaTime(), 1.f / 30.f);
@@ -159,6 +195,7 @@ namespace VCX::Labs::Final {
         if (_gameStarted) {
             HandleSlingshotInput(pos);
         } else {
+            if (ImGui::IsKeyDown(ImGuiKey_S)) return;
             _cameraManager.ProcessInput(_camera, pos);
         }
     }
@@ -166,37 +203,125 @@ namespace VCX::Labs::Final {
     void CaseAngryBirds3D::ResetScene() {
         _dragging = false;
         _birdLaunched = false;
+        _birdMovingToSlingshot = false;
         _dragPosition = _scene.Anchor;
-        _birdIndex = _scene.Reset(_physics, _breakThreshold, static_cast<AngryBirdsScene::Level>(_levelIndex));
+        _birdQueue = _scene.Reset(_physics, _breakThreshold, static_cast<LevelRegister::LevelID>(_levelIndex));
+        _activeBirdSlot = 0;
+        _timeSinceBirdLaunch = 0.f;
+        _birdMoveTime = 0.f;
+
+        for (std::size_t i = 0; i < _birdQueue.size(); ++i) {
+            glm::vec3 const position = i == 0 ? _scene.Anchor : BirdWaitingPosition(i);
+            _physics.AddBird(position, _birdQueue[i], int(i));
+        }
+        _birdIndex = FindBirdBySlot(_activeBirdSlot);
         _gameStarted = false;
     }
 
-    void CaseAngryBirds3D::StepSimulation(float dt) {
-        _physics.Step(dt, _dragging ? _birdIndex : -1, _dragPosition);
-
-        _birdIndex = -1;
+    int CaseAngryBirds3D::FindBirdBySlot(std::size_t slot) const {
         for (int i = 0; i < int(_physics.Bodies.size()); ++i) {
-            if (_physics.Bodies[i].Kind == BodyKind::Bird) {
-                _birdIndex = i;
-                break;
+            auto const & body = _physics.Bodies[i];
+            if (body.IsAlive && body.Kind == BodyKind::Bird && body.BirdSlot == int(slot)) {
+                return i;
             }
         }
-        if (_birdIndex < 0 && !_birdLaunched) {
-            _birdIndex = _physics.AddBird(_scene.Anchor);
+        return -1;
+    }
+
+    glm::vec3 CaseAngryBirds3D::BirdWaitingPosition(std::size_t slot) const {
+        return _scene.Anchor + glm::vec3(-1.0f - 0.95f * float(slot - 1), -1.35f, 0.82f);
+    }
+
+    void CaseAngryBirds3D::StepSimulation(float dt) {
+        constexpr float NextBirdDelay = 2.f;
+        constexpr float BirdMoveDuration = .55f;
+
+        if (_birdLaunched) {
+            _timeSinceBirdLaunch += dt;
+            if (_timeSinceBirdLaunch >= NextBirdDelay && _activeBirdSlot + 1 < _birdQueue.size()) {
+                _activeBirdSlot++;
+                _birdIndex = FindBirdBySlot(_activeBirdSlot);
+                if (_birdIndex >= 0) {
+                    _birdMovingToSlingshot = true;
+                    _birdLaunched = false;
+                    _dragging = false;
+                    _dragPosition = _scene.Anchor;
+                    _birdMoveStart = _physics.Bodies[_birdIndex].Position;
+                    _birdMoveTime = 0.f;
+                }
+            }
+        }
+
+        std::vector<PinnedBody> pinnedBodies;
+        pinnedBodies.reserve(_birdQueue.size());
+        for (int i = 0; i < int(_physics.Bodies.size()); ++i) {
+            auto const & body = _physics.Bodies[i];
+            if (!body.IsAlive || body.Kind != BodyKind::Bird || body.BirdSlot < 0) continue;
+
+            std::size_t const slot = std::size_t(body.BirdSlot);
+            if (slot < _activeBirdSlot) continue;
+
+            glm::vec3 position = BirdWaitingPosition(slot);
+            if (slot == _activeBirdSlot) {
+                if (_birdLaunched) continue;
+
+                if (_birdMovingToSlingshot) {
+                    _birdMoveTime += dt;
+                    float const t = glm::clamp(_birdMoveTime / BirdMoveDuration, 0.f, 1.f);
+                    position = glm::mix(_birdMoveStart, _scene.Anchor, t);
+                    if (t >= 1.f) {
+                        _birdMovingToSlingshot = false;
+                    }
+                } else {
+                    position = _dragging ? _dragPosition : _scene.Anchor;
+                }
+            }
+
+            pinnedBodies.push_back(PinnedBody { i, position });
+        }
+
+        _physics.Step(dt, pinnedBodies);
+
+        if (!_birdLaunched) {
+            _birdIndex = FindBirdBySlot(_activeBirdSlot);
         }
     }
 
     void CaseAngryBirds3D::LaunchBird() {
-        if (_birdIndex < 0 || _birdIndex >= int(_physics.Bodies.size())) return;
+        if (_birdMovingToSlingshot || _birdIndex < 0 || _birdIndex >= int(_physics.Bodies.size())) return;
         auto & bird = _physics.Bodies[_birdIndex];
         glm::vec3 pull = _scene.Anchor - _dragPosition;
         pull.z = 0.f;
+        float launchSpeedScale = 1.f;
+        if (bird.Bird == BirdType::Boomerang) {
+            launchSpeedScale = 1.3f;
+        } else if (bird.Bird == BirdType::Speed) {
+            launchSpeedScale = 1.5f;
+        }
         bird.Position = _dragPosition;
-        bird.Velocity = pull * _powerScale;
+        bird.Velocity = pull * _powerScale * launchSpeedScale;
         bird.AngularVel = glm::vec3(0.f, 0.f, -glm::length(pull) * 8.f);
-        bird.LifeTime = 20.f;
+        bird.Age = 0.f;
+        bird.LifeTime = 10.f;
+        bird.Scale = 1.f;
+        bird.BirdWasLaunched = true;
+        bird.BirdHasCollided = false;
+        bird.BoomerangActive = false;
+        bird.BoomerangAcceleration = glm::vec3(0.f);
         _birdLaunched = true;
+        _timeSinceBirdLaunch = 0.f;
         _gameStarted = false;
+    }
+
+    void CaseAngryBirds3D::ActivateBoomerangBird() {
+        if (!_birdLaunched || _birdIndex < 0 || _birdIndex >= int(_physics.Bodies.size())) return;
+
+        auto & bird = _physics.Bodies[_birdIndex];
+        if (bird.Kind != BodyKind::Bird || bird.Bird != BirdType::Boomerang || bird.BirdHasCollided) return;
+
+        constexpr float BoomerangAcceleration = 26.f;
+        bird.BoomerangAcceleration = glm::vec3(-BoomerangAcceleration, 0.f, 0.f);
+        bird.BoomerangActive = true;
     }
 
     void CaseAngryBirds3D::HandleSlingshotInput(ImVec2 const & mousePos) {
@@ -210,7 +335,7 @@ namespace VCX::Labs::Final {
         bool const leftReleased = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
         ImGuiIO const & io = ImGui::GetIO();
 
-        if (!_birdLaunched && hover && leftClicked && !io.KeyCtrl && !io.KeyShift && !io.KeyAlt) {
+        if (!_birdLaunched && !_birdMovingToSlingshot && hover && leftClicked && !io.KeyCtrl && !io.KeyShift && !io.KeyAlt) {
             _dragging = true;
         }
         if (_dragging && leftHeld) {
@@ -303,7 +428,7 @@ namespace VCX::Labs::Final {
             .Lights               = {
                 Rendering::SceneObject::Light {
                     .Intensity  = glm::vec3(.55f),
-                    .Direction  = glm::normalize(glm::vec3(0.f, 1.f, 0.2f)),
+                    .Direction  = glm::normalize(glm::vec3(0.f, 1.f, 0.5f)),
                     .Position   = glm::vec3(0.f),
                     .CutOff     = 1.f,
                     .OuterCutOff= 0.f,
@@ -323,22 +448,36 @@ namespace VCX::Labs::Final {
         glEnable(GL_LINE_SMOOTH);
         glLineWidth(1.2f);
 
+        constexpr float GroundRenderHalfExtent = 80.f;
+        constexpr float GroundRenderThickness  = .06f;
+
         RigidBody ground;
         ground.Kind = BodyKind::Ground;
         ground.IsStatic = true;
-        ground.Position = glm::vec3(1.5f, -.06f, 0.f);
-        ground.HalfSize = glm::vec3(10.f, .06f, 4.f);
-        ground.Color = glm::vec3(.24f, .46f, .22f);
+        ground.Position = glm::vec3(3.f, -GroundRenderThickness, 0.f);
+        ground.HalfSize = glm::vec3(GroundRenderHalfExtent, GroundRenderThickness, GroundRenderHalfExtent);
+        ground.Color = glm::vec3(1.f);
         DrawBox(ground);
 
         for (auto const & body : _physics.Bodies) {
             if (!body.IsAlive) continue;
+            if (body.Kind == BodyKind::Glass) continue;
             if (body.Kind == BodyKind::Bird) {
                 DrawSphere(body);
             } else {
                 DrawBox(body);
             }
         }
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        for (auto const & body : _physics.Bodies) {
+            if (!body.IsAlive || body.Kind != BodyKind::Glass) continue;
+            DrawBox(body);
+        }
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
 
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.1f, .05f, .02f));
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.1f, .05f, .02f));
@@ -371,7 +510,7 @@ namespace VCX::Labs::Final {
             glm::vec3(-1, 0,  0), glm::vec3(0,  0, -1), glm::vec3(0, -1,  0),
         };
 
-        static std::array<glm::vec2, 4> const uvs = {
+        static std::array<glm::vec2, 4> const baseUvs = {
             glm::vec2(0.f, 0.f), glm::vec2(1.f, 0.f), glm::vec2(1.f, 1.f), glm::vec2(0.f, 1.f),
         };
 
@@ -382,20 +521,24 @@ namespace VCX::Labs::Final {
 
         std::vector<Vertex> vertices;
         vertices.reserve(36);
+        float const uvScale = body.Kind == BodyKind::Ground ? body.HalfSize.x * .5f : 1.f;
         for (std::size_t face = 0; face < faces.size(); ++face) {
             auto const normal = glm::normalize(body.Rotation * faceNormals[face]);
             auto const & indices = faces[face];
-            vertices.push_back(Vertex{ corners[indices[0]], normal, uvs[0], glm::vec3(0.f) });
-            vertices.push_back(Vertex{ corners[indices[1]], normal, uvs[1], glm::vec3(0.f) });
-            vertices.push_back(Vertex{ corners[indices[2]], normal, uvs[2], glm::vec3(0.f) });
-            vertices.push_back(Vertex{ corners[indices[0]], normal, uvs[0], glm::vec3(0.f) });
-            vertices.push_back(Vertex{ corners[indices[2]], normal, uvs[2], glm::vec3(0.f) });
-            vertices.push_back(Vertex{ corners[indices[3]], normal, uvs[3], glm::vec3(0.f) });
+            vertices.push_back(Vertex{ corners[indices[0]], normal, baseUvs[0] * uvScale, glm::vec3(0.f) });
+            vertices.push_back(Vertex{ corners[indices[1]], normal, baseUvs[1] * uvScale, glm::vec3(0.f) });
+            vertices.push_back(Vertex{ corners[indices[2]], normal, baseUvs[2] * uvScale, glm::vec3(0.f) });
+            vertices.push_back(Vertex{ corners[indices[0]], normal, baseUvs[0] * uvScale, glm::vec3(0.f) });
+            vertices.push_back(Vertex{ corners[indices[2]], normal, baseUvs[2] * uvScale, glm::vec3(0.f) });
+            vertices.push_back(Vertex{ corners[indices[3]], normal, baseUvs[3] * uvScale, glm::vec3(0.f) });
         }
 
-        _program.GetUniforms().SetByName("u_Color", body.Color);
+        bool const isGlass = body.Kind == BodyKind::Glass;
+        _program.GetUniforms().SetByName("u_Color", isGlass ? body.Color * 1.35f : body.Color);
+        _program.GetUniforms().SetByName("u_Alpha", isGlass ? .45f : 1.f);
         _boxItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<Vertex>(vertices));
-        _boxItem.Draw({ _diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() });
+        auto const & diffuseTexture = body.Kind == BodyKind::Ground ? _groundTexture : _diffuseTexture;
+        _boxItem.Draw({ diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() });
     }
 
     void CaseAngryBirds3D::DrawSphere(RigidBody const & body) {
@@ -404,10 +547,12 @@ namespace VCX::Labs::Final {
         for (auto const & p : _sphereVertices) {
             float const u = std::atan2(p.z, p.x) * (0.5f / std::numbers::pi_v<float>) + 0.5f;
             float const v = std::acos(glm::clamp(p.y, -1.f, 1.f)) * (1.f / std::numbers::pi_v<float>);
-            vertices.push_back(Vertex{ p * body.Radius * body.Scale, p, glm::vec2(u, v), body.Position });
+            glm::vec3 const rotated = body.Rotation * p;
+            vertices.push_back(Vertex{ rotated * body.Radius * body.Scale, rotated, glm::vec2(u, v), body.Position });
         }
 
         _program.GetUniforms().SetByName("u_Color", body.Color);
+        _program.GetUniforms().SetByName("u_Alpha", 1.f);
         _sphereItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<Vertex>(vertices));
         _sphereItem.Draw({ _diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() }, vertices.size());
     }
@@ -422,7 +567,16 @@ namespace VCX::Labs::Final {
     void CaseAngryBirds3D::DrawTrajectoryPreview() {
         if (!_dragging) return;
         glm::vec3 pos = _dragPosition;
-        glm::vec3 vel = (_scene.Anchor - _dragPosition) * _powerScale;
+        float launchSpeedScale = 1.f;
+        if (_birdIndex >= 0 && _birdIndex < int(_physics.Bodies.size())) {
+            auto const & bird = _physics.Bodies[_birdIndex];
+            if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::Speed) {
+                launchSpeedScale = 1.5f;
+            } else if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::Boomerang) {
+                launchSpeedScale = 1.3f;
+            }
+        }
+        glm::vec3 vel = (_scene.Anchor - _dragPosition) * _powerScale * launchSpeedScale;
         glm::vec3 prev = pos;
         for (int i = 0; i < 32; ++i) {
             vel += _physics.Gravity * .07f;

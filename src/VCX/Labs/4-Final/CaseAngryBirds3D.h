@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -46,6 +47,7 @@ namespace VCX::Labs::Final {
         Engine::GL::UniqueRenderItem                                 _lineItem;
         Engine::GL::UniqueUniformBlock<Rendering::SceneObject::PassConstants> _passConstantsBlock;
         Engine::GL::UniqueTexture2D                                  _diffuseTexture;
+        Engine::GL::UniqueTexture2D                                  _groundTexture;
         Engine::GL::UniqueTexture2D                                  _specularTexture;
         Engine::GL::UniqueTexture2D                                  _heightTexture;
 
@@ -53,21 +55,31 @@ namespace VCX::Labs::Final {
         AngryBirdsScene   _scene;
 
         std::vector<glm::vec3> _sphereVertices;
+        std::vector<BirdType>  _birdQueue;
 
         bool  _pause             = false;
         bool  _gameStarted       = false;
         bool  _dragging          = false;
         bool  _birdLaunched      = false;
+        bool  _birdMovingToSlingshot = false;
+        bool  _developerMode     = false;
         int   _birdIndex         = -1;
         int   _levelIndex        = 0;
+        std::size_t _activeBirdSlot = 0;
+        float _timeSinceBirdLaunch = 0.f;
+        float _birdMoveTime        = 0.f;
         float _powerScale        = 6.f;
         float _breakThreshold    = 7.f;
         int   _substeps          = 6;
         glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.35f, 0.f);
+        glm::vec3 _birdMoveStart = glm::vec3(0.f);
 
         void ResetScene();
+        int  FindBirdBySlot(std::size_t slot) const;
+        glm::vec3 BirdWaitingPosition(std::size_t slot) const;
         void StepSimulation(float dt);
         void LaunchBird();
+        void ActivateBoomerangBird();
         void HandleSlingshotInput(ImVec2 const & mousePos);
 
         void BuildStaticGeometry();

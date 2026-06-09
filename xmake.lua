@@ -98,7 +98,9 @@ target("lab4")
     add_packages("fcl")
     add_headerfiles("src/VCX/Labs/4-Final/*.h")
     add_headerfiles("src/VCX/Labs/4-Final/*.hpp")
+    add_headerfiles("src/VCX/Labs/4-Final/Levels/*.h")
     add_files      ("src/VCX/Labs/4-Final/*.cpp")
+    add_files      ("src/VCX/Labs/4-Final/Levels/*.cpp")
     if is_plat("windows") then
         add_cxflags("/EHsc")
     end

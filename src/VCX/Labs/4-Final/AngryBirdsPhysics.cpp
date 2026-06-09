@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <random>
 
 #include <Eigen/Geometry>
 #include <fcl/narrowphase/collision.h>
@@ -15,6 +16,30 @@ namespace VCX::Labs::Final {
         constexpr float c_ContactSlop = .005f;
         constexpr float c_PositionCorrection = .72f;
         constexpr float c_RotationImpulseScale = 1.0f;
+        constexpr float c_FragmentShrinkSpeed = .85f;
+        constexpr float c_LifeTimeShrinkDuration = .5f;
+
+        // Random number generator for fragment explosion effects
+        std::mt19937& GetRandomEngine() {
+            static std::mt19937 engine(std::random_device{}());
+            return engine;
+        }
+
+        float RandomFloat(float min, float max) {
+            std::uniform_real_distribution<float> dist(min, max);
+            return dist(GetRandomEngine());
+        }
+
+        glm::vec3 RandomUnitVector() {
+            float phi = RandomFloat(0.f, 2.f * 3.14159265359f);
+            float cosTheta = RandomFloat(-1.f, 1.f);
+            float sinTheta = std::sqrt(1.f - cosTheta * cosTheta);
+            return glm::vec3(
+                sinTheta * std::cos(phi),
+                sinTheta * std::sin(phi),
+                cosTheta
+            );
+        }
 
         glm::vec3 SafeNormalize(glm::vec3 const & v, glm::vec3 const & fallback = glm::vec3(0.f, 1.f, 0.f)) {
             float const len = glm::length(v);
@@ -58,11 +83,12 @@ namespace VCX::Labs::Final {
             transform.linear() = Eigen::Quaternionf(body.Rotation.w, body.Rotation.x, body.Rotation.y, body.Rotation.z).toRotationMatrix();
 
             if (body.Kind == BodyKind::Bird) {
-                auto shape = std::make_shared<fcl::Spheref>(body.Radius);
+                auto shape = std::make_shared<fcl::Spheref>(body.Radius * body.Scale);
                 return fcl::CollisionObjectf(shape, transform);
             }
 
-            auto shape = std::make_shared<fcl::Boxf>(body.HalfSize.x * 2.f, body.HalfSize.y * 2.f, body.HalfSize.z * 2.f);
+            glm::vec3 const scaledHalfSize = body.HalfSize * body.Scale;
+            auto shape = std::make_shared<fcl::Boxf>(scaledHalfSize.x * 2.f, scaledHalfSize.y * 2.f, scaledHalfSize.z * 2.f);
             return fcl::CollisionObjectf(shape, transform);
         }
 
@@ -80,13 +106,17 @@ namespace VCX::Labs::Final {
             glm::vec3 normal(0.f);
             glm::vec3 position(0.f);
             float penetration = 0.f;
+            contact.Points.clear();
+            contact.Points.reserve(result.numContacts());
             for (int i = 0; i < result.numContacts(); ++i) {
                 auto const & c = result.getContact(i);
+                glm::vec3 const point = glm::vec3(c.pos[0], c.pos[1], c.pos[2]);
                 normal += glm::vec3(c.normal[0], c.normal[1], c.normal[2]);
-                position += glm::vec3(c.pos[0], c.pos[1], c.pos[2]);
+                position += point;
                 penetration += c.penetration_depth;
+                contact.Points.push_back(point);
             }
-            normal = glm::normalize(normal);
+            normal = SafeNormalize(normal);
             if (glm::dot(normal, b.Position - a.Position) < 0.f) {
                 normal = -normal;
             }
@@ -102,15 +132,23 @@ namespace VCX::Labs::Final {
         FragmentsCreated = 0;
     }
 
-    int AngryBirdsPhysics::AddBird(glm::vec3 const & anchor) {
+    int AngryBirdsPhysics::AddBird(glm::vec3 const & anchor, BirdType birdType, int birdSlot) {
         RigidBody bird;
         bird.Kind = BodyKind::Bird;
+        bird.Bird = birdType;
+        bird.BirdSlot = birdSlot;
         bird.Mass = 1.4f;
         bird.InvMass = 1.f / bird.Mass;
         bird.Position = anchor;
         bird.Radius = BirdRadius;
         bird.HalfSize = glm::vec3(BirdRadius);
-        bird.Color = glm::vec3(.9f, .12f, .08f);
+        if (birdType == BirdType::Speed) {
+            bird.Color = glm::vec3(1.f, .82f, .08f);
+        } else if (birdType == BirdType::Boomerang) {
+            bird.Color = glm::vec3(.18f, .72f, .95f);
+        } else {
+            bird.Color = glm::vec3(.9f, .12f, .08f);
+        }
         bird.Breakable = false;
         bird.Toughness = 100.f;
         bird.Age = 0.f;
@@ -156,43 +194,57 @@ namespace VCX::Labs::Final {
         return int(Bodies.size()) - 1;
     }
 
-    void AngryBirdsPhysics::Step(float dt, int draggedIndex, glm::vec3 const & draggedPosition) {
-        if (draggedIndex >= 0 && draggedIndex < int(Bodies.size())) {
-            auto & body = Bodies[draggedIndex];
-            body.Position = draggedPosition;
+    void AngryBirdsPhysics::Step(float dt, std::vector<PinnedBody> const & pinnedBodies) {
+        for (auto const & pinned : pinnedBodies) {
+            if (pinned.Index < 0 || pinned.Index >= int(Bodies.size())) continue;
+            auto & body = Bodies[pinned.Index];
+            body.Position = pinned.Position;
             body.Velocity = glm::vec3(0.f);
             body.AngularVel = glm::vec3(0.f);
             body.Rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
         }
 
-        Integrate(dt, draggedIndex);
+        Integrate(dt, pinnedBodies);
         ResolveCollisions();
 
         Bodies.erase(
             std::remove_if(Bodies.begin(), Bodies.end(), [](RigidBody const & body) {
-                return !body.IsAlive || (body.LifeTime > 0.f && body.Age >= body.LifeTime)
-                    || body.Position.y < -10.f || glm::length(body.Position) > 80.f;
+                return !body.IsAlive || body.Position.y < -10.f || glm::length(body.Position) > 80.f;
             }),
             Bodies.end());
     }
 
-    void AngryBirdsPhysics::Integrate(float dt, int draggedIndex) {
+    void AngryBirdsPhysics::Integrate(float dt, std::vector<PinnedBody> const & pinnedBodies) {
         for (int i = 0; i < int(Bodies.size()); ++i) {
             auto & body = Bodies[i];
-            if (!body.IsAlive || body.IsStatic || i == draggedIndex) {
+            bool const isPinned = std::any_of(pinnedBodies.begin(), pinnedBodies.end(), [i](PinnedBody const & pinned) {
+                return pinned.Index == i;
+            });
+            if (!body.IsAlive || body.IsStatic || isPinned) {
                 continue;
             }
 
             body.Age += dt;
-            
-            // Calculate scale for disappearing animation
-            if (body.LifeTime > 0.f && body.Age >= body.LifeTime * 0.95f) {
-                float disappearProgress = (body.Age - body.LifeTime * 0.95f) / (body.LifeTime * .05f);
-                disappearProgress = glm::clamp(disappearProgress, 0.f, 1.f);
-                body.Scale = 1.f - disappearProgress * disappearProgress;
+
+            if (body.Kind == BodyKind::Fragment) {
+                body.Scale = std::max(body.Scale - c_FragmentShrinkSpeed * dt, 0.f);
+                if (body.Scale <= 0.f) {
+                    body.IsAlive = false;
+                    continue;
+                }
+            }
+
+            if (body.LifeTime > 0.f && body.Age >= body.LifeTime) {
+                float const shrinkProgress = glm::clamp((body.Age - body.LifeTime) / c_LifeTimeShrinkDuration, 0.f, 1.f);
+                body.Scale = 1.f - shrinkProgress;
+                if (body.Scale <= 0.f) {
+                    body.IsAlive = false;
+                    continue;
+                }
             }
             
-            body.Velocity += Gravity * dt;
+            glm::vec3 const extraAcceleration = body.BoomerangActive && !body.BirdHasCollided ? body.BoomerangAcceleration : glm::vec3(0.f);
+            body.Velocity += (Gravity + extraAcceleration) * dt;
             body.Position += body.Velocity * dt;
             body.Velocity *= LinearDamping;
             body.AngularVel *= AngularDamping;
@@ -206,6 +258,11 @@ namespace VCX::Labs::Final {
     }
 
     void AngryBirdsPhysics::ResolveCollisions() {
+        if (CurrentSolver == SolverType::ConstraintBasedJacobi) {
+            ResolveCollisionsConstraintBased();
+            return;
+        }
+
         std::vector<Contact> contacts;
         std::vector<Contact> impactContacts;
 
@@ -232,6 +289,17 @@ namespace VCX::Labs::Final {
                 groundBody.IsStatic = true;
                 groundBody.InvMass = 0.f;
                 RigidBody & b = c.B >= 0 ? Bodies[c.B] : groundBody;
+                auto stopBoomerangOnImpact = [](RigidBody & body) {
+                    if (body.Kind == BodyKind::Bird && body.BirdWasLaunched && (body.Position.x > 0.f || body.BoomerangActive)) {
+                        body.BirdHasCollided = true;
+                        body.BoomerangActive = false;
+                        body.BoomerangAcceleration = glm::vec3(0.f);
+                    }
+                };
+                stopBoomerangOnImpact(a);
+                if (c.B >= 0) {
+                    stopBoomerangOnImpact(b);
+                }
                 if (a.IsStatic && b.IsStatic) continue;
 
                 // positional correction (translation only)
@@ -241,22 +309,11 @@ namespace VCX::Labs::Final {
                 if (!a.IsStatic) a.Position -= c.Normal * correctionMag * a.InvMass;
                 if (!b.IsStatic) b.Position += c.Normal * correctionMag * b.InvMass;
 
-                glm::vec3 const relVel = ContactVelocity(b, c.Point) - ContactVelocity(a, c.Point);
-                float const normalVel = glm::dot(relVel, c.Normal);
-                c.Impact = std::max(c.Impact, std::max(-normalVel, 0.f));
-                if (c.Impact > 0.f) {
-                    impactContacts.push_back(c);
-                }
-                if (normalVel >= 0.f) continue;
-
                 // compute world-space inverse inertia
                 glm::mat3 const Ra = glm::mat3_cast(a.Rotation);
                 glm::mat3 const Rb = glm::mat3_cast(b.Rotation);
                 glm::mat3 const Ia_inv = Ra * a.InvInertiaLocal * glm::transpose(Ra);
                 glm::mat3 const Ib_inv = Rb * b.InvInertiaLocal * glm::transpose(Rb);
-
-                glm::vec3 const rA = c.Point - a.Position;
-                glm::vec3 const rB = c.Point - b.Position;
 
                 auto angularTerm = [&](glm::mat3 const & Iinv, glm::vec3 const & r, glm::vec3 const & n) {
                     glm::vec3 const rcrossn = glm::cross(r, n);
@@ -264,45 +321,59 @@ namespace VCX::Labs::Final {
                     return glm::dot(n, glm::cross(tmp, r));
                 };
 
-                float const angA = a.IsStatic ? 0.f : angularTerm(Ia_inv, rA, c.Normal);
-                float const angB = b.IsStatic ? 0.f : angularTerm(Ib_inv, rB, c.Normal);
+                auto const & points = c.Points.empty() ? std::vector<glm::vec3> { c.Point } : c.Points;
+                for (auto const & point : points) {
+                    glm::vec3 const relVel = ContactVelocity(b, point) - ContactVelocity(a, point);
+                    float const normalVel = glm::dot(relVel, c.Normal);
+                    c.Impact = std::max(c.Impact, std::max(-normalVel, 0.f));
+                    if (normalVel >= 0.f) continue;
 
-                float const effectiveMass = invMassSum + angA + angB;
-                if (effectiveMass <= 1e-6f) continue;
+                    glm::vec3 const rA = point - a.Position;
+                    glm::vec3 const rB = point - b.Position;
 
-                float const impulseMag = -(1.f + Restitution) * normalVel / effectiveMass;
-                glm::vec3 const impulse = impulseMag * c.Normal;
+                    float const angA = a.IsStatic ? 0.f : angularTerm(Ia_inv, rA, c.Normal);
+                    float const angB = b.IsStatic ? 0.f : angularTerm(Ib_inv, rB, c.Normal);
 
-                if (!a.IsStatic) {
-                    a.Velocity -= impulse * a.InvMass;
-                    a.AngularVel -= Ia_inv * glm::cross(rA, impulse);
-                }
-                if (!b.IsStatic) {
-                    b.Velocity += impulse * b.InvMass;
-                    b.AngularVel += Ib_inv * glm::cross(rB, impulse);
-                }
+                    float const effectiveMass = invMassSum + angA + angB;
+                    if (effectiveMass <= 1e-6f) continue;
 
-                // friction (tangential) impulse using same pattern with tangent direction
-                glm::vec3 tangent = relVel - normalVel * c.Normal;
-                if (glm::length(tangent) > 1e-5f) {
-                    tangent = glm::normalize(tangent);
-                    float const angAT = a.IsStatic ? 0.f : angularTerm(Ia_inv, rA, tangent);
-                    float const angBT = b.IsStatic ? 0.f : angularTerm(Ib_inv, rB, tangent);
-                    float const effectiveMassT = invMassSum + angAT + angBT;
-                    if (effectiveMassT > 1e-6f) {
-                        float const jt = -glm::dot(relVel, tangent) / effectiveMassT;
-                        float const maxF = impulseMag * Friction;
-                        float const jtClamped = glm::clamp(jt, -maxF, maxF);
-                        glm::vec3 const frictionImpulse = jtClamped * tangent;
-                        if (!a.IsStatic) {
-                            a.Velocity -= frictionImpulse * a.InvMass;
-                            a.AngularVel -= Ia_inv * glm::cross(rA, frictionImpulse);
-                        }
-                        if (!b.IsStatic) {
-                            b.Velocity += frictionImpulse * b.InvMass;
-                            b.AngularVel += Ib_inv * glm::cross(rB, frictionImpulse);
+                    float const impulseMag = -(1.f + Restitution) * normalVel / effectiveMass;
+                    glm::vec3 const impulse = impulseMag * c.Normal;
+
+                    if (!a.IsStatic) {
+                        a.Velocity -= impulse * a.InvMass;
+                        a.AngularVel -= Ia_inv * glm::cross(rA, impulse);
+                    }
+                    if (!b.IsStatic) {
+                        b.Velocity += impulse * b.InvMass;
+                        b.AngularVel += Ib_inv * glm::cross(rB, impulse);
+                    }
+
+                    // friction (tangential) impulse using same pattern with tangent direction
+                    glm::vec3 tangent = relVel - normalVel * c.Normal;
+                    if (glm::length(tangent) > 1e-5f) {
+                        tangent = glm::normalize(tangent);
+                        float const angAT = a.IsStatic ? 0.f : angularTerm(Ia_inv, rA, tangent);
+                        float const angBT = b.IsStatic ? 0.f : angularTerm(Ib_inv, rB, tangent);
+                        float const effectiveMassT = invMassSum + angAT + angBT;
+                        if (effectiveMassT > 1e-6f) {
+                            float const jt = -glm::dot(relVel, tangent) / effectiveMassT;
+                            float const maxF = impulseMag * Friction;
+                            float const jtClamped = glm::clamp(jt, -maxF, maxF);
+                            glm::vec3 const frictionImpulse = jtClamped * tangent;
+                            if (!a.IsStatic) {
+                                a.Velocity -= frictionImpulse * a.InvMass;
+                                a.AngularVel -= Ia_inv * glm::cross(rA, frictionImpulse);
+                            }
+                            if (!b.IsStatic) {
+                                b.Velocity += frictionImpulse * b.InvMass;
+                                b.AngularVel += Ib_inv * glm::cross(rB, frictionImpulse);
+                            }
                         }
                     }
+                }
+                if (c.Impact > 0.f) {
+                    impactContacts.push_back(c);
                 }
             }
         }
@@ -379,10 +450,37 @@ namespace VCX::Labs::Final {
                     frag.Color = source.Color * glm::vec3(.95f + .04f * x, .95f + .04f * y, .95f + .04f * z);
                     frag.Toughness = 100.f;
                     frag.Breakable = false;
-                    frag.Velocity = source.Velocity + dir * (impact * 1.4f + 1.5f) + source.Rotation * (glm::vec3(x, y, z) * .8f);
-                    frag.AngularVel = source.AngularVel + glm::vec3(z, x, y) * 5.f;
+
+                    // Calculate fragment position relative to center for explosion direction
+                    glm::vec3 const fragOffset = glm::vec3(x * h.x, y * h.y, z * h.z) * .55f;
+                    glm::vec3 const fragWorldOffset = source.Rotation * fragOffset;
+
+                    // Random explosion effect: fragments burst in random directions
+                    glm::vec3 const randomDir = RandomUnitVector();
+                    float const randomBurstSpeed = RandomFloat(2.0f, 6.0f) + impact * RandomFloat(0.3f, 0.8f);
+
+                    // Base velocity from source
+                    glm::vec3 baseVelocity = source.Velocity;
+
+                    // Impact-driven velocity (along impulse direction with randomness)
+                    glm::vec3 impactVelocity = dir * (impact * RandomFloat(1.0f, 2.0f) + RandomFloat(0.5f, 2.0f));
+
+                    // Random burst velocity (explosion effect)
+                    glm::vec3 burstVelocity = randomDir * randomBurstSpeed;
+
+                    // Outward velocity from center (positional explosion)
+                    glm::vec3 outwardDir = SafeNormalize(fragWorldOffset, randomDir);
+                    glm::vec3 outwardVelocity = outwardDir * RandomFloat(1.5f, 4.0f);
+
+                    // Combine all velocity components
+                    frag.Velocity = baseVelocity + impactVelocity + burstVelocity + outwardVelocity;
+
+                    // Random angular velocity for tumbling effect
+                    frag.AngularVel = source.AngularVel + RandomUnitVector() * RandomFloat(2.0f, 10.0f);
+
                     frag.Age = 0.f;
-                    frag.LifeTime = 4.5f;
+                    frag.LifeTime = -1.f;
+                    frag.Scale = 1.f;
                     Bodies.push_back(frag);
                     FragmentsCreated++;
                 }
@@ -395,6 +493,10 @@ namespace VCX::Labs::Final {
         auto const & bb = Bodies[b];
         if (!ba.IsAlive || !bb.IsAlive || (ba.IsStatic && bb.IsStatic)) return false;
         if (ba.Kind == BodyKind::Fragment || bb.Kind == BodyKind::Fragment) return false;
+        if (ba.Kind == BodyKind::Bird && bb.Kind == BodyKind::Bird) {
+            if (!ba.BirdWasLaunched && !bb.BirdWasLaunched) return false;
+            return SphereBoxContact(ba, bb, a, b, contact);
+        }
 
         if (ba.Kind == BodyKind::Bird && bb.Kind != BodyKind::Bird) {
             return SphereBoxContact(ba, bb, a, b, contact);
@@ -421,27 +523,34 @@ namespace VCX::Labs::Final {
     }
 
     bool AngryBirdsPhysics::GroundContact(RigidBody const & body, int index, Contact & contact) const {
-        if (body.IsStatic || !body.IsAlive || body.Kind == BodyKind::Fragment) return false;
+        if (body.IsStatic || !body.IsAlive) return false;
 
-        float bottom = body.Position.y - body.Radius;
+        float bottom = body.Position.y - body.Radius * body.Scale;
         glm::vec3 contactPoint = glm::vec3(body.Position.x, GroundY, body.Position.z);
+        contact.Points.clear();
+        contact.Points.push_back(contactPoint);
         if (body.Kind != BodyKind::Bird) {
             bottom = std::numeric_limits<float>::max();
             glm::vec3 sumPoint(0.f);
             int count = 0;
+            contact.Points.clear();
             std::array<glm::vec3, 8> const signs = {
                 glm::vec3(-1,  1,  1), glm::vec3( 1,  1,  1), glm::vec3( 1,  1, -1), glm::vec3(-1,  1, -1),
                 glm::vec3(-1, -1,  1), glm::vec3( 1, -1,  1), glm::vec3( 1, -1, -1), glm::vec3(-1, -1, -1),
             };
+            glm::vec3 const scaledHalfSize = body.HalfSize * body.Scale;
             for (auto const & sign : signs) {
-                glm::vec3 const vertex = body.Position + body.Rotation * (sign * body.HalfSize);
+                glm::vec3 const vertex = body.Position + body.Rotation * (sign * scaledHalfSize);
                 if (vertex.y < bottom - 1e-5f) {
                     bottom = vertex.y;
                     sumPoint = vertex;
                     count = 1;
+                    contact.Points.clear();
+                    contact.Points.push_back(vertex);
                 } else if (vertex.y <= bottom + 1e-5f) {
                     sumPoint += vertex;
                     ++count;
+                    contact.Points.push_back(vertex);
                 }
             }
             if (count > 0) {
@@ -455,6 +564,76 @@ namespace VCX::Labs::Final {
         contact.Normal = glm::vec3(0.f, -1.f, 0.f);
         contact.Penetration = GroundY - bottom;
         contact.Point = contactPoint;
+        if (contact.Points.empty()) {
+            contact.Points.push_back(contactPoint);
+        }
         return true;
+    }
+
+    void AngryBirdsPhysics::ResolveCollisionsConstraintBased() {
+        std::vector<Contact> contacts;
+        std::vector<Contact> impactContacts;
+
+        for (int i = 0; i < int(Bodies.size()); ++i) {
+            if (!Bodies[i].IsAlive) continue;
+
+            Contact ground;
+            if (GroundContact(Bodies[i], i, ground)) {
+                contacts.push_back(ground);
+            }
+            for (int j = i + 1; j < int(Bodies.size()); ++j) {
+                Contact contact;
+                if (FindContact(i, j, contact)) {
+                    contacts.push_back(contact);
+                }
+            }
+        }
+
+        for (auto & c : contacts) {
+            auto & a = Bodies[c.A];
+            RigidBody groundBody;
+            groundBody.IsStatic = true;
+            groundBody.InvMass = 0.f;
+            RigidBody & b = c.B >= 0 ? Bodies[c.B] : groundBody;
+
+            auto stopBoomerangOnImpact = [](RigidBody & body) {
+                if (body.Kind == BodyKind::Bird && body.BirdWasLaunched && (body.Position.x > 0.f || body.BoomerangActive)) {
+                    body.BirdHasCollided = true;
+                    body.BoomerangActive = false;
+                    body.BoomerangAcceleration = glm::vec3(0.f);
+                }
+            };
+            stopBoomerangOnImpact(a);
+            if (c.B >= 0) {
+                stopBoomerangOnImpact(b);
+            }
+
+            if (a.IsStatic && b.IsStatic) continue;
+
+            glm::mat3 const Ra = glm::mat3_cast(a.Rotation);
+            glm::mat3 const Rb = glm::mat3_cast(b.Rotation);
+            glm::mat3 const Ia_inv = Ra * a.InvInertiaLocal * glm::transpose(Ra);
+            glm::mat3 const Ib_inv = Rb * b.InvInertiaLocal * glm::transpose(Rb);
+
+            auto contactVelocity = [&](RigidBody const & body, glm::vec3 const & point) {
+                if (body.IsStatic) return glm::vec3(0.f);
+                return body.Velocity + glm::cross(body.AngularVel, point - body.Position);
+            };
+
+            const auto& points = c.Points.empty() ? std::vector<glm::vec3>{ c.Point } : c.Points;
+            for (auto const & point : points) {
+                glm::vec3 const relVel = contactVelocity(b, point) - contactVelocity(a, point);
+                float const normalVel = glm::dot(relVel, c.Normal);
+                c.Impact = std::max(c.Impact, std::max(-normalVel, 0.f));
+            }
+
+            if (c.Impact > 0.f) {
+                impactContacts.push_back(c);
+            }
+        }
+
+        m_ConstraintSolver.SolveConstraints(Bodies, contacts, Restitution, Friction, 12);
+
+        TryBreakBodies(impactContacts);
     }
 }

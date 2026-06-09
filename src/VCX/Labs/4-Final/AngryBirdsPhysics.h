@@ -1,9 +1,13 @@
 #pragma once
 
+#include <utility>
 #include <vector>
+#include <memory>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
+
+#include "Labs/4-Final/ConstraintSolver.h"
 
 namespace VCX::Labs::Final {
     enum class BodyKind {
@@ -16,8 +20,19 @@ namespace VCX::Labs::Final {
         Ground,
     };
 
+    enum class BirdType {
+        Normal,
+        Speed,
+        Boomerang,
+    };
+
     struct RigidBody {
         BodyKind  Kind       = BodyKind::Wood;
+        BirdType  Bird       = BirdType::Normal;
+        int       BirdSlot   = -1;
+        bool      BirdWasLaunched = false;
+        bool      BirdHasCollided = false;
+        bool      BoomerangActive = false;
         bool      IsStatic   = false;
         bool      IsAlive    = true;
         bool      Breakable  = true;
@@ -25,6 +40,7 @@ namespace VCX::Labs::Final {
         float     InvMass    = 1.f;
         glm::vec3 Position   = glm::vec3(0.f);
         glm::vec3 Velocity   = glm::vec3(0.f);
+        glm::vec3 BoomerangAcceleration = glm::vec3(0.f);
         glm::quat Rotation   = glm::quat(1.f, 0.f, 0.f, 0.f);
         glm::vec3 AngularVel = glm::vec3(0.f);
         glm::vec3 HalfSize   = glm::vec3(.5f);
@@ -44,7 +60,13 @@ namespace VCX::Labs::Final {
         glm::vec3 Normal      = glm::vec3(0.f, 1.f, 0.f);
         float     Penetration = 0.f;
         glm::vec3 Point       = glm::vec3(0.f);
+        std::vector<glm::vec3> Points;
         float     Impact      = 0.f;
+    };
+
+    struct PinnedBody {
+        int       Index    = -1;
+        glm::vec3 Position = glm::vec3(0.f);
     };
 
     class AngryBirdsPhysics {
@@ -58,14 +80,20 @@ namespace VCX::Labs::Final {
         float     AngularDamping = .9996f;
         int       FragmentsCreated = 0;
 
-        int  AddBird(glm::vec3 const & anchor);
+        SolverType CurrentSolver = SolverType::SequentialImpulse;
+
+        int  AddBird(glm::vec3 const & anchor, BirdType birdType = BirdType::Normal, int birdSlot = -1);
         int  AddBox(BodyKind kind, glm::vec3 position, glm::vec3 halfSize, float density, glm::vec3 color, float toughness, bool breakable = true);
-        void Step(float dt, int draggedIndex, glm::vec3 const & draggedPosition);
+        void Step(float dt, std::vector<PinnedBody> const & pinnedBodies);
         void Clear();
 
+        void SetSolverType(SolverType type) { CurrentSolver = type; }
+        SolverType GetSolverType() const { return CurrentSolver; }
+
     private:
-        void Integrate(float dt, int draggedIndex);
+        void Integrate(float dt, std::vector<PinnedBody> const & pinnedBodies);
         void ResolveCollisions();
+        void ResolveCollisionsConstraintBased();
         void TryBreakBodies(std::vector<Contact> const & contacts);
         void BreakBody(int index, glm::vec3 const & impulseDir, float impact);
 
@@ -73,6 +101,8 @@ namespace VCX::Labs::Final {
         bool SphereBoxContact(RigidBody const & sphere, RigidBody const & box, int sphereIndex, int boxIndex, Contact & contact) const;
         bool BoxBoxContact(RigidBody const & a, RigidBody const & b, int aIndex, int bIndex, Contact & contact) const;
         bool GroundContact(RigidBody const & body, int index, Contact & contact) const;
+
+        ConstraintSolver m_ConstraintSolver;
     };
 
     constexpr float GroundY = 0.f;
