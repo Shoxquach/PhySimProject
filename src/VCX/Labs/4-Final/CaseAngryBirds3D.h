@@ -1,6 +1,5 @@
 #pragma once
 
-
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
@@ -86,7 +85,22 @@ namespace VCX::Labs::Final {
 
         float _timeSinceBirdLaunch = 0.f;
         float _birdMoveTime        = 0.f;
-        float _powerScale        = 6.f;
+        float _springConstant    = 38.f;    // spring stiffness constant k (N/m)
+        float _springDamping     = 3.5f;    // snap-back damping (lower = longer visible oscillation)
+        float _springOscillationFreq = 4.5f;// snap-back oscillation frequency (Hz)
+
+        // spring snap-back animation state
+        float _springSnapTime      = 0.f;
+        float _springSnapDuration  = 0.60f;
+        bool  _springSnapping      = false;
+        glm::vec3 _springSnapFrom  = glm::vec3(0.f);
+        glm::vec3 _springSnapPos   = glm::vec3(0.f);
+
+        // auto-advance to next level after clearing current
+        bool  _autoAdvanceActive  = false;
+        float _autoAdvanceTimer   = 0.f;
+        float _autoAdvanceDelay   = 2.5f;   // seconds before auto-advancing
+
         float _breakThreshold    = 7.f;
         int   _substeps          = 6;
         glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.65f, 0.f);
@@ -114,8 +128,10 @@ namespace VCX::Labs::Final {
         void DrawSphere(RigidBody const & body);
         void DrawLine(glm::vec3 const & a, glm::vec3 const & b, glm::vec3 const & color);
         void DrawTrajectoryPreview();
+        void DrawSlingshot(glm::vec3 const & leftFork, glm::vec3 const & rightFork, glm::vec3 const & birdPos, float stretchRatio, glm::vec3 const & baseColor);
         void DrawFluid();
 
         glm::vec3 ScreenToLaunchPlane(ImVec2 const & mousePos) const;
     };
 }
+

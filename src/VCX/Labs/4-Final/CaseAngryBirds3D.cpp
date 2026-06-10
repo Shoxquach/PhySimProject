@@ -161,6 +161,10 @@ namespace VCX::Labs::Final {
         }
         if (_gameState == GameState::Won) {
             ImGui::TextColored(ImVec4(0.2f, 1.f, 0.2f, 1.f), "LEVEL CLEARED!");
+            if (_autoAdvanceActive) {
+                float const remaining = std::max(_autoAdvanceDelay - _autoAdvanceTimer, 0.f);
+                ImGui::TextColored(ImVec4(1.f, 1.f, 0.4f, 1.f), "Next level in %.1fs...", remaining);
+            }
         }
 
         ImGui::Spacing();
@@ -172,7 +176,10 @@ namespace VCX::Labs::Final {
             }
 
             ImGui::Checkbox("Pause", &_pause);
-            ImGui::SliderFloat("Launch Power", &_powerScale, 2.f, 12.f, "%.1f");
+            ImGui::SliderFloat("Auto-Advance Delay", &_autoAdvanceDelay, 0.5f, 8.f, "%.1f");
+            ImGui::SliderFloat("Spring Constant (k)", &_springConstant, 8.f, 80.f, "%.1f");
+            ImGui::SliderFloat("Spring Damping", &_springDamping, 2.f, 30.f, "%.1f");
+            ImGui::SliderFloat("Oscillation Freq", &_springOscillationFreq, 2.f, 10.f, "%.1f");
             ImGui::SliderFloat("Break Threshold", &_breakThreshold, 2.f, 18.f, "%.1f");
             ImGui::SliderFloat("Restitution", &_world.Rigid.Restitution, .05f, .8f, "%.2f");
             ImGui::SliderFloat("Friction", &_world.Rigid.Friction, .2f, .98f, "%.2f");
@@ -254,6 +261,8 @@ namespace VCX::Labs::Final {
         _score = 0;
         _shotsUsed = 0;
         _wonAwarded = false;
+        _autoAdvanceActive = false;
+        _autoAdvanceTimer  = 0.f;
         _prevTargets = CountAliveTargets(_world);
         _prevBlocks = CountAliveBreakables(_world);
 
@@ -364,6 +373,36 @@ namespace VCX::Labs::Final {
             }
         }
         UpdateScore();
+
+        // Auto-advance to next level when current is cleared
+        if (_gameState == GameState::Won && !_autoAdvanceActive) {
+            _autoAdvanceActive = true;
+            _autoAdvanceTimer  = 0.f;
+        }
+        if (_autoAdvanceActive) {
+            _autoAdvanceTimer += dt;
+            if (_autoAdvanceTimer >= _autoAdvanceDelay) {
+                _autoAdvanceActive = false;
+                _levelIndex = (_levelIndex + 1) % 8;  // 8 levels, wrap around
+                ResetScene();
+            }
+        }
+
+        // Spring snap-back animation after launch
+        if (_springSnapping) {
+            _springSnapTime += dt;
+            float const t = glm::clamp(_springSnapTime / _springSnapDuration, 0.f, 1.f);
+            // Damped oscillation: e^(-damping*t) * cos(2π*freq*t)
+            // Let the exponential decay naturally — no extra (1-t) multiplier
+            float const envelope = std::exp(-_springDamping * t);
+            float const oscillation = std::cos(2.0f * 3.14159f * _springOscillationFreq * t);
+            float const amplitude = envelope * oscillation;
+            _springSnapPos = glm::mix(_scene.Anchor, _springSnapFrom, amplitude);
+            if (t >= 1.f) {
+                _springSnapping = false;
+                _springSnapPos = _scene.Anchor;
+            }
+        }
     }
 
     void CaseAngryBirds3D::LaunchBird() {
@@ -371,6 +410,7 @@ namespace VCX::Labs::Final {
         auto & bird = _world.Rigid.Bodies[_birdIndex];
         glm::vec3 pull = _scene.Anchor - _dragPosition;
         pull.z = 0.f;
+        float const stretch = glm::length(pull);
         float launchSpeedScale = 1.f;
         if (bird.Bird == BirdType::Boomerang) {
             launchSpeedScale = 1.3f;
@@ -379,9 +419,14 @@ namespace VCX::Labs::Final {
         } else if (bird.Bird == BirdType::WaterBalloon) {
             launchSpeedScale = 0.85f;
         }
+
+        // Spring energy conservation: ½k·stretch² = ½m·v²  →  v = stretch·√(k/m)
+        float const springSpeed = stretch * std::sqrt(_springConstant / bird.Mass);
+        glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : glm::vec3(1.f, 0.f, 0.f);
+
         bird.Position = ClampBirdPositionAboveGround(_dragPosition);
-        bird.Velocity = pull * _powerScale * launchSpeedScale;
-        bird.AngularVel = glm::vec3(0.f, 0.f, -glm::length(pull) * 8.f);
+        bird.Velocity = launchDir * springSpeed * launchSpeedScale;
+        bird.AngularVel = glm::vec3(0.f, 0.f, -stretch * 8.f);
         bird.Age = 0.f;
         bird.LifeTime = 10.f;
         bird.Scale = 1.f;
@@ -393,6 +438,12 @@ namespace VCX::Labs::Final {
         _timeSinceBirdLaunch = 0.f;
         _gameStarted = false;
         _shotsUsed++;
+
+        // Trigger spring snap-back animation
+        _springSnapping = true;
+        _springSnapTime = 0.f;
+        _springSnapFrom = _dragPosition;
+        _springSnapPos  = _dragPosition;
     }
 
     void CaseAngryBirds3D::ActivateBoomerangBird() {
@@ -572,9 +623,20 @@ namespace VCX::Labs::Final {
 
         DrawFluid();
 
-        glLineWidth(3.2f);
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.08f, .035f, .015f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.08f, .035f, .015f));
+        // Slingshot rubber band — single continuous V-shaped ribbon (no seams)
+        {
+            float const stretch = _dragging ?
+                glm::length(glm::vec2(_dragPosition - _scene.Anchor)) / 2.2f : 0.f;
+            glm::vec3 const bandTarget = _springSnapping ? _springSnapPos :
+                                         _dragging ? _dragPosition : _scene.Anchor;
+
+            glm::vec3 const leftFork  = _scene.Anchor + glm::vec3(0.f, .85f, -.55f);
+            glm::vec3 const rightFork = _scene.Anchor + glm::vec3(0.f, .85f, .55f);
+            // Base: warm amber/tan rubber. Tension shifts R↑, G↓, B↓ toward red.
+            DrawSlingshot(leftFork, rightFork, bandTarget, stretch, glm::vec3(.38f, .22f, .10f));
+        }
+
+        // Wooden posts
         glLineWidth(4.0f);
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _scene.Anchor + glm::vec3(0.f, -.5f, -.55f), glm::vec3(.38f, .19f, .07f));
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _scene.Anchor + glm::vec3(0.f, -.5f, .55f), glm::vec3(.38f, .19f, .07f));
@@ -664,15 +726,26 @@ namespace VCX::Labs::Final {
         if (!_dragging) return;
         glm::vec3 pos = _dragPosition;
         float launchSpeedScale = 1.f;
+        float birdMass = 1.4f;
         if (_birdIndex >= 0 && _birdIndex < int(_world.Rigid.Bodies.size())) {
             auto const & bird = _world.Rigid.Bodies[_birdIndex];
             if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::Speed) {
                 launchSpeedScale = 1.5f;
             } else if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::Boomerang) {
                 launchSpeedScale = 1.3f;
+            } else if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::WaterBalloon) {
+                launchSpeedScale = 0.85f;
             }
+            if (bird.Mass > 0.01f) birdMass = bird.Mass;
         }
-        glm::vec3 vel = (_scene.Anchor - _dragPosition) * _powerScale * launchSpeedScale;
+
+        // Spring energy: ½k·stretch² = ½m·v²  →  v = stretch·√(k/m)
+        glm::vec3 pull = _scene.Anchor - _dragPosition;
+        pull.z = 0.f;
+        float const stretch = glm::length(pull);
+        float const springSpeed = stretch * std::sqrt(_springConstant / birdMass);
+        glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : glm::vec3(1.f, 0.f, 0.f);
+        glm::vec3 vel = launchDir * springSpeed * launchSpeedScale;
         glm::vec3 prev = pos;
         for (int i = 0; i < 32; ++i) {
             vel += _world.Rigid.Gravity * .07f;
@@ -681,6 +754,115 @@ namespace VCX::Labs::Final {
             prev = pos;
             if (pos.y < GroundY) break;
         }
+    }
+
+    void CaseAngryBirds3D::DrawSlingshot(
+        glm::vec3 const & leftFork,
+        glm::vec3 const & rightFork,
+        glm::vec3 const & birdPos,
+        float stretchRatio,
+        glm::vec3 const & baseColor
+    ) {
+        constexpr int   kHalfSegments = 24;
+        constexpr float kSagBase      = 0.32f;
+        constexpr float kSagDecay     = 0.70f;
+        constexpr glm::vec3 kWorldUp(0.f, 0.f, 1.f);
+        constexpr glm::vec3 kBandNormal(0.f, 1.f, 0.f);
+
+        float const vertSpanL = std::abs(leftFork.y - birdPos.y);
+        float const vertSpanR = std::abs(rightFork.y - birdPos.y);
+        float const rawSag    = kSagBase * std::max(1.0f - stretchRatio * kSagDecay, 0.06f);
+        float const sagL      = std::min(rawSag, vertSpanL * 0.48f);
+        float const sagR      = std::min(rawSag, vertSpanR * 0.48f);
+
+        // Dynamic color: redder when tense
+        float const tension = stretchRatio;
+        glm::vec3 const bandColor = glm::vec3(
+            baseColor.x + tension * 0.55f,
+            baseColor.y * (1.0f - tension * 0.55f),
+            baseColor.z * (1.0f - tension * 0.75f));
+
+        // Ribbon half-width in world units
+        float const halfWidth = (0.050f + (1.0f - stretchRatio) * 0.120f);
+
+        // Build V-shaped curve: leftFork → birdPos → rightFork
+        // Total points = 2*kHalfSegments + 1  (birdPos shared at midpoint)
+        int const totalPts = kHalfSegments * 2 + 1;
+        std::vector<glm::vec3> curvePts(totalPts);
+
+        // Left half: leftFork → birdPos
+        for (int i = 0; i <= kHalfSegments; ++i) {
+            float const t = float(i) / float(kHalfSegments);
+            float const catenary = std::sin(3.1415926535f * t);
+            curvePts[i] = glm::mix(leftFork, birdPos, t)
+                        - glm::vec3(0.f, sagL * catenary, 0.f);
+        }
+        // Right half: birdPos → rightFork (birdPos already at index kHalfSegments)
+        for (int i = 0; i <= kHalfSegments; ++i) {
+            float const t = float(i) / float(kHalfSegments);
+            float const catenary = std::sin(3.1415926535f * t);
+            curvePts[kHalfSegments + i] = glm::mix(birdPos, rightFork, t)
+                                        - glm::vec3(0.f, sagR * catenary, 0.f);
+        }
+
+        // Compute right vectors for the entire V-curve
+        std::vector<glm::vec3> rights(totalPts);
+        for (int i = 0; i < totalPts; ++i) {
+            glm::vec3 tang;
+            if (i == 0)
+                tang = glm::normalize(curvePts[1] - curvePts[0]);
+            else if (i == totalPts - 1)
+                tang = glm::normalize(curvePts[totalPts - 1] - curvePts[totalPts - 2]);
+            else
+                tang = glm::normalize(curvePts[i + 1] - curvePts[i - 1]);
+
+            rights[i] = glm::normalize(glm::cross(tang, kWorldUp));
+            if (glm::length(rights[i]) < 0.1f)
+                rights[i] = glm::normalize(glm::cross(tang, glm::vec3(0.f, 1.f, 0.f)));
+        }
+
+        // Smooth right vectors across the apex (birdPos) so both halves blend
+        // Use a sliding window average around the midpoint
+        int const apex = kHalfSegments;
+        int const blendRadius = 6;
+        for (int i = apex - blendRadius; i <= apex + blendRadius; ++i) {
+            if (i < 0 || i >= totalPts) continue;
+            float const d = float(std::abs(i - apex)) / float(blendRadius);
+            float const w = std::exp(-d * d * 3.0f);  // Gaussian falloff
+            glm::vec3 const avg = glm::normalize(rights[apex]);
+            rights[i] = glm::normalize(glm::mix(rights[i], avg, w * 0.7f));
+        }
+
+        // Build triangle strip vertices
+        std::vector<Vertex> verts;
+        verts.reserve(totalPts * 2);
+        for (int i = 0; i < totalPts; ++i) {
+            glm::vec3 const w = rights[i] * halfWidth;
+            verts.push_back(Vertex{ curvePts[i] + w, kBandNormal, glm::vec2(0.f), glm::vec3(0.f) });
+            verts.push_back(Vertex{ curvePts[i] - w, kBandNormal, glm::vec2(1.f), glm::vec3(0.f) });
+        }
+
+        // Emit triangles: two per segment, consistent CCW winding
+        int const segs = totalPts - 1;
+        std::vector<Vertex> triVerts;
+        triVerts.reserve(segs * 6);
+        for (int i = 0; i < segs; ++i) {
+            int const i0 = i * 2;
+            int const i1 = i0 + 1;
+            int const i2 = i0 + 2;
+            int const i3 = i0 + 3;
+            triVerts.push_back(verts[i0]);
+            triVerts.push_back(verts[i1]);
+            triVerts.push_back(verts[i2]);
+            triVerts.push_back(verts[i2]);
+            triVerts.push_back(verts[i1]);
+            triVerts.push_back(verts[i3]);
+        }
+
+        _program.GetUniforms().SetByName("u_Color", bandColor);
+        _program.GetUniforms().SetByName("u_Alpha", 1.f);
+        _boxItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<Vertex>(triVerts));
+        _boxItem.Draw({ _diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() });
     }
 
     void CaseAngryBirds3D::BurstWaterBalloon(int index) {
@@ -791,8 +973,20 @@ namespace VCX::Labs::Final {
         float const subSize = 18.f;
         ImVec2 const subsz = font->CalcTextSizeA(subSize, FLT_MAX, 0.f, subStr.c_str());
 
-        float const boxW = std::max(ssz.x, subsz.x) + 48.f;
-        float const boxH = bigSize + subSize + 24.f;
+        // Auto-advance countdown line
+        float advanceH = 0.f;
+        ImVec2 advancesz(0.f, 0.f);
+        std::string advanceStr;
+        if (_autoAdvanceActive) {
+            float const remaining = std::max(_autoAdvanceDelay - _autoAdvanceTimer, 0.f);
+            int const nextLevel = (_levelIndex + 1) % 8;
+            advanceStr = "Cleared! Next level in " + std::to_string(int(remaining * 10.f) / 10.f) + "s...";
+            advancesz = font->CalcTextSizeA(subSize, FLT_MAX, 0.f, advanceStr.c_str());
+            advanceH = subSize + 4.f;
+        }
+
+        float const boxW = std::max({ ssz.x, subsz.x, advancesz.x }) + 48.f;
+        float const boxH = bigSize + subSize + advanceH + 24.f;
         ImVec2 const p0(cx - boxW * 0.5f, top);
         ImVec2 const p1(cx + boxW * 0.5f, top + boxH);
         dl->AddRectFilled(p0, p1, IM_COL32(18, 22, 30, 175), 10.f);
@@ -800,5 +994,8 @@ namespace VCX::Labs::Final {
 
         dl->AddText(font, bigSize, ImVec2(cx - ssz.x * 0.5f, top + 8.f), IM_COL32(255, 220, 80, 255), scoreStr.c_str());
         dl->AddText(font, subSize, ImVec2(cx - subsz.x * 0.5f, top + 8.f + bigSize + 4.f), IM_COL32(220, 230, 240, 230), subStr.c_str());
+        if (_autoAdvanceActive) {
+            dl->AddText(font, subSize, ImVec2(cx - advancesz.x * 0.5f, top + 8.f + bigSize + 4.f + subSize + 4.f), IM_COL32(100, 255, 130, 255), advanceStr.c_str());
+        }
     }
 } // namespace VCX::Labs::Final
