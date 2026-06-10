@@ -141,6 +141,7 @@ namespace VCX::Labs::Final {
         }
 
         ImGui::Spacing();
+        ImGui::TextDisabled("Camera: Left-drag=rotate  Right-drag=pan  Wheel=zoom  WASD=pan");
         if (!_gameStarted) {
             ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "Press S to start");
         } else {
@@ -241,7 +242,17 @@ namespace VCX::Labs::Final {
 
     void CaseAngryBirds3D::OnProcessInput(ImVec2 const & pos) {
         if (_gameStarted) {
-            HandleSlingshotInput(pos);
+            ImGuiIO const & io = ImGui::GetIO();
+            // Pass through to camera when using right-click, Ctrl, or wheel — even while aiming
+            bool const cameraOp = io.KeyCtrl || io.KeyShift ||
+                ImGui::IsMouseDown(ImGuiMouseButton_Right) ||
+                ImGui::IsMouseDown(ImGuiMouseButton_Middle) ||
+                io.MouseWheel != 0.f;
+            if (cameraOp) {
+                _cameraManager.ProcessInput(_camera, pos);
+            } else {
+                HandleSlingshotInput(pos);
+            }
         } else {
             if (ImGui::IsKeyDown(ImGuiKey_S)) return;
             _cameraManager.ProcessInput(_camera, pos);
@@ -255,10 +266,13 @@ namespace VCX::Labs::Final {
         _dragPosition = _scene.Anchor;
         _birdQueue = _scene.Reset(_world, _breakThreshold, static_cast<LevelRegister::LevelID>(_levelIndex));
         _activeBirdSlot = 0;
+        {
+            auto lvl = LevelRegister::GetInstance().GetLevel(static_cast<LevelRegister::LevelID>(_levelIndex));
+            _maxPull = lvl ? lvl->GetMaxPull() : 2.2f;
+        }
         _timeSinceBirdLaunch = 0.f;
         _birdMoveTime = 0.f;
         _gameState = GameState::Playing;
-        _score = 0;
         _shotsUsed = 0;
         _wonAwarded = false;
         _autoAdvanceActive = false;
@@ -409,7 +423,6 @@ namespace VCX::Labs::Final {
         if (_birdMovingToSlingshot || _birdIndex < 0 || _birdIndex >= int(_world.Rigid.Bodies.size())) return;
         auto & bird = _world.Rigid.Bodies[_birdIndex];
         glm::vec3 pull = _scene.Anchor - _dragPosition;
-        pull.z = 0.f;
         float const stretch = glm::length(pull);
         float launchSpeedScale = 1.f;
         if (bird.Bird == BirdType::Boomerang) {
@@ -472,18 +485,13 @@ namespace VCX::Labs::Final {
             _dragging = true;
         }
         if (_dragging && leftHeld) {
-            glm::vec3 const planePos = ScreenToLaunchPlane(mousePos);
-            _dragPosition = _scene.Anchor;
-            _dragPosition.x = planePos.x;
-            _dragPosition.y = planePos.y;
+            _dragPosition = ScreenToLaunchPlane(mousePos);
 
-            float const maxPull = 2.2f;
-            glm::vec2 const pullXY = glm::vec2(_dragPosition.x - _scene.Anchor.x, _dragPosition.y - _scene.Anchor.y);
-            float const pullLen = glm::length(pullXY);
+            float const maxPull = _maxPull;
+            float const pullLen = glm::length(_dragPosition - _scene.Anchor);
             if (pullLen > maxPull) {
-                glm::vec2 const pullDir = glm::normalize(pullXY);
-                _dragPosition.x = _scene.Anchor.x + pullDir.x * maxPull;
-                _dragPosition.y = _scene.Anchor.y + pullDir.y * maxPull;
+                glm::vec3 const pullDir = glm::normalize(_dragPosition - _scene.Anchor);
+                _dragPosition = _scene.Anchor + pullDir * maxPull;
             }
             _dragPosition = ClampBirdPositionAboveGround(_dragPosition);
         }
@@ -509,11 +517,12 @@ namespace VCX::Labs::Final {
 
         glm::vec3 const rayOrigin = glm::vec3(nearPoint);
         glm::vec3 const rayDir = glm::normalize(glm::vec3(farPoint - nearPoint));
-        glm::vec3 const planeNormal = glm::vec3(0.f, 0.f, 1.f);
+        // Plane through Anchor, perpendicular to camera forward — allows 3D aim
+        glm::vec3 const planeNormal = glm::normalize(_camera.Target - _camera.Eye);
         float const denom = glm::dot(rayDir, planeNormal);
         if (std::abs(denom) < 1e-5f) return _dragPosition;
 
-        float const t = (_scene.Anchor.z - rayOrigin.z) / rayDir.z;
+        float const t = glm::dot(_scene.Anchor - rayOrigin, planeNormal) / denom;
         return rayOrigin + rayDir * t;
     }
 
@@ -626,7 +635,7 @@ namespace VCX::Labs::Final {
         // Slingshot rubber band — single continuous V-shaped ribbon (no seams)
         {
             float const stretch = _dragging ?
-                glm::length(glm::vec2(_dragPosition - _scene.Anchor)) / 2.2f : 0.f;
+                glm::length(_dragPosition - _scene.Anchor) / _maxPull : 0.f;
             glm::vec3 const bandTarget = _springSnapping ? _springSnapPos :
                                          _dragging ? _dragPosition : _scene.Anchor;
 
@@ -741,7 +750,6 @@ namespace VCX::Labs::Final {
 
         // Spring energy: ½k·stretch² = ½m·v²  →  v = stretch·√(k/m)
         glm::vec3 pull = _scene.Anchor - _dragPosition;
-        pull.z = 0.f;
         float const stretch = glm::length(pull);
         float const springSpeed = stretch * std::sqrt(_springConstant / birdMass);
         glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : glm::vec3(1.f, 0.f, 0.f);

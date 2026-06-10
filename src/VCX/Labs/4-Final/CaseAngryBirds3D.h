@@ -101,6 +101,8 @@ namespace VCX::Labs::Final {
         float _autoAdvanceTimer   = 0.f;
         float _autoAdvanceDelay   = 2.5f;   // seconds before auto-advancing
 
+        float _maxPull           = 2.2f;   // per-level max pull distance
+
         float _breakThreshold    = 7.f;
         int   _substeps          = 6;
         glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.65f, 0.f);
