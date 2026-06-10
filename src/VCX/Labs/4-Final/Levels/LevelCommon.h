@@ -1,10 +1,11 @@
 #pragma once
 
 #include <glm/glm.hpp>
+
 #include "Labs/4-Final/Physics/PhysicsSystem.h"
+#include "Labs/4-Final/World.h"
 
 namespace VCX::Labs::Final {
-    // Material colors for level blocks
     namespace Materials {
         inline glm::vec3 const Wood   = glm::vec3(0.62f, 0.38f, 0.16f);
         inline glm::vec3 const Glass  = glm::vec3(0.35f, 0.72f, 0.95f);
@@ -12,7 +13,6 @@ namespace VCX::Labs::Final {
         inline glm::vec3 const Target = glm::vec3(0.28f, 0.75f, 0.22f);
     }
 
-    // Material densities (mass per unit volume)
     namespace Densities {
         constexpr float Wood   = 0.8f;
         constexpr float Glass  = 0.5f;
@@ -45,4 +45,24 @@ namespace VCX::Labs::Final {
         AngryBirdsPhysics & _physics;
         float               _breakThreshold;
     };
+
+    inline int CountAliveTargets(World const & world) {
+        int n = 0;
+        for (auto const & b : world.Rigid.Bodies) {
+            if (b.IsAlive && b.Kind == BodyKind::Target) ++n;
+        }
+        return n;
+    }
+
+    inline int CountAliveBreakables(World const & world) {
+        int n = 0;
+        for (auto const & b : world.Rigid.Bodies) {
+            if (b.IsAlive && b.Breakable && b.Kind != BodyKind::Bird) ++n;
+        }
+        return n;
+    }
+
+    inline GameState TargetsClearedStatus(World const & world) {
+        return CountAliveTargets(world) == 0 ? GameState::Won : GameState::Playing;
+    }
 }

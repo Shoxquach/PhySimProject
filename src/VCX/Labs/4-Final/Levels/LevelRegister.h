@@ -8,7 +8,9 @@
 #include "Labs/4-Final/Levels/BoomerangChallengeLevel.h"
 #include "Labs/4-Final/Levels/ClassicTowerLevel.h"
 #include "Labs/4-Final/Levels/DominoRunLevel.h"
+#include "Labs/4-Final/Levels/DamBreakLevel.h"
 #include "Labs/4-Final/Levels/GrandCitadelLevel.h"
+#include "Labs/4-Final/Levels/MoatLevel.h"
 #include "Labs/4-Final/Levels/StoneCastleLevel.h"
 #include "Labs/4-Final/Levels/TargetPracticeLevel.h"
 
@@ -23,6 +25,8 @@ namespace VCX::Labs::Final {
             DominoRun,
             BoomerangChallenge,
             GrandCitadel,
+            Moat,
+            DamBreak,
         };
 
         /// @brief 获取注册管理器单例
@@ -56,6 +60,8 @@ namespace VCX::Labs::Final {
             _levelMap[static_cast<int>(LevelID::DominoRun)] = std::make_shared<DominoRunLevel>();
             _levelMap[static_cast<int>(LevelID::BoomerangChallenge)] = std::make_shared<BoomerangChallengeLevel>();
             _levelMap[static_cast<int>(LevelID::GrandCitadel)] = std::make_shared<GrandCitadelLevel>();
+            _levelMap[static_cast<int>(LevelID::Moat)] = std::make_shared<MoatLevel>();
+            _levelMap[static_cast<int>(LevelID::DamBreak)] = std::make_shared<DamBreakLevel>();
         }
 
         ~LevelRegister() = default;

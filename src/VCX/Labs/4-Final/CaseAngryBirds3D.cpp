@@ -1,8 +1,11 @@
 #include "Labs/4-Final/CaseAngryBirds3D.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
+#include <cstdlib>
 #include <numbers>
+#include <string>
 
 #include <glm/ext.hpp>
 #include <imgui_internal.h>
@@ -11,14 +14,24 @@
 #include "Engine/GL/Texture.hpp"
 #include "Engine/loader.h"
 #include "Labs/Common/ImGuiHelper.h"
+#include "Labs/4-Final/Config.h"
+#include "Labs/4-Final/Levels/LevelCommon.h"
 #include "Labs/4-Final/Levels/LevelRegister.h"
 
 namespace VCX::Labs::Final {
+    namespace {
+        float frand() { return float(std::rand()) / float(RAND_MAX); }
+        float frand2() { return frand() * 2.f - 1.f; }
+    }
     CaseAngryBirds3D::CaseAngryBirds3D():
         _program(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/sphere_phong.vert"),
                                              Engine::GL::SharedShader("assets/shaders/phong.frag") })),
         _lineProgram(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/flat.vert"),
                                                  Engine::GL::SharedShader("assets/shaders/flat.frag") })),
+        _skyProgram(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/sky.vert"),
+                                                Engine::GL::SharedShader("assets/shaders/sky.frag") })),
+        _pointProgram(Engine::GL::UniqueProgram({ Engine::GL::SharedShader("assets/shaders/point.vert"),
+                                                  Engine::GL::SharedShader("assets/shaders/point.frag") })),
         _boxItem(Engine::GL::VertexLayout()
             .Add<Vertex>("vertex", Engine::GL::DrawFrequency::Stream)
             .At<Vertex, glm::vec3>(0, &Vertex::Position)
@@ -32,9 +45,20 @@ namespace VCX::Labs::Final {
             .At<Vertex, glm::vec2>(2, &Vertex::TexCoord)
             .At<Vertex, glm::vec3>(3, &Vertex::Offset), Engine::GL::PrimitiveType::Triangles),
         _lineItem(Engine::GL::VertexLayout().Add<glm::vec3>("position", Engine::GL::DrawFrequency::Stream, 0), Engine::GL::PrimitiveType::Lines),
+        _fluidItem(Engine::GL::VertexLayout()
+            .Add<FluidVertex>("vertex", Engine::GL::DrawFrequency::Stream)
+            .At<FluidVertex, glm::vec3>(0, &FluidVertex::Position)
+            .At<FluidVertex, glm::vec3>(1, &FluidVertex::Color), Engine::GL::PrimitiveType::Points),
+        _skyItem(Engine::GL::VertexLayout().Add<glm::vec3>("position", Engine::GL::DrawFrequency::Static, 0), Engine::GL::PrimitiveType::Triangles),
         _passConstantsBlock(1, Engine::GL::DrawFrequency::Stream) {
         BuildStaticGeometry();
         BuildSphereGeometry();
+
+        std::vector<glm::vec3> const skyVerts = {
+            { -1.f, -1.f, 0.f }, { 1.f, -1.f, 0.f }, { 1.f, 1.f, 0.f },
+            { -1.f, -1.f, 0.f }, { 1.f, 1.f, 0.f }, { -1.f, 1.f, 0.f },
+        };
+        _skyItem.UpdateVertexBuffer("position", Engine::make_span_bytes<glm::vec3>(skyVerts));
 
         VCX::Engine::Texture2D<VCX::Engine::Formats::RGBA8> diffuse{1, 1};
         diffuse.Fill({ 0xff, 0xff, 0xff, 0xff });
@@ -89,6 +113,8 @@ namespace VCX::Labs::Final {
             "Domino Run",
             "Boomerang Challenge",
             "Grand Citadel",
+            "Moat (Buoyancy)",
+            "Dam Break (Two-way)",
         };
 
         if (ImGui::Combo("Level", &_levelIndex, LevelNames, IM_ARRAYSIZE(LevelNames))) {
@@ -105,7 +131,7 @@ namespace VCX::Labs::Final {
 
         int aliveBreakables = 0;
         int aliveTargets = 0;
-        for (auto const & body : _physics.Bodies) {
+        for (auto const & body : _world.Rigid.Bodies) {
             if (body.IsAlive && body.Breakable && body.Kind != BodyKind::Bird) {
                 aliveBreakables++;
             }
@@ -120,10 +146,22 @@ namespace VCX::Labs::Final {
         } else {
             ImGui::TextColored(ImVec4(0.f, 1.f, 0.f, 1.f), "Ready - drag the bird to launch");
         }
-        if (_birdIndex >= 0 && _birdIndex < int(_physics.Bodies.size()) && _physics.Bodies[_birdIndex].Bird == BirdType::Boomerang) {
-            ImGui::Text("Boomerang: press G before impact");
+        if (_birdIndex >= 0 && _birdIndex < int(_world.Rigid.Bodies.size())) {
+            auto const & bird = _world.Rigid.Bodies[_birdIndex];
+            if (bird.Bird == BirdType::Boomerang) {
+                ImGui::Text("Boomerang: press G before impact");
+            } else if (bird.Bird == BirdType::WaterBalloon) {
+                ImGui::Text("Water Balloon: bursts on impact or in water");
+            }
         }
         ImGui::Text("Targets left: %d", aliveTargets);
+        ImGui::Text("Score: %d", _score);
+        if (_world.Fluid) {
+            ImGui::Text("Fluid particles: %d", _world.Fluid->ParticleCount());
+        }
+        if (_gameState == GameState::Won) {
+            ImGui::TextColored(ImVec4(0.2f, 1.f, 0.2f, 1.f), "LEVEL CLEARED!");
+        }
 
         ImGui::Spacing();
         ImGui::Checkbox("Developer Mode", &_developerMode);
@@ -136,8 +174,8 @@ namespace VCX::Labs::Final {
             ImGui::Checkbox("Pause", &_pause);
             ImGui::SliderFloat("Launch Power", &_powerScale, 2.f, 12.f, "%.1f");
             ImGui::SliderFloat("Break Threshold", &_breakThreshold, 2.f, 18.f, "%.1f");
-            ImGui::SliderFloat("Restitution", &_physics.Restitution, .05f, .8f, "%.2f");
-            ImGui::SliderFloat("Friction", &_physics.Friction, .2f, .98f, "%.2f");
+            ImGui::SliderFloat("Restitution", &_world.Rigid.Restitution, .05f, .8f, "%.2f");
+            ImGui::SliderFloat("Friction", &_world.Rigid.Friction, .2f, .98f, "%.2f");
             ImGui::SliderInt("Substeps", &_substeps, 1, 12);
 
             ImGui::Separator();
@@ -145,16 +183,16 @@ namespace VCX::Labs::Final {
                 "Sequential Impulse",
                 "Constraint-Based (Jacobi)",
             };
-            int solverType = static_cast<int>(_physics.GetSolverType());
+            int solverType = static_cast<int>(_world.Rigid.GetSolverType());
             if (ImGui::Combo("Solver Type", &solverType, SolverTypeNames, IM_ARRAYSIZE(SolverTypeNames))) {
-                _physics.SetSolverType(static_cast<SolverType>(solverType));
+                _world.Rigid.SetSolverType(static_cast<SolverType>(solverType));
             }
             ImGui::Text("Current Solver: %s", SolverTypeNames[solverType]);
 
             ImGui::Separator();
             ImGui::Text("Press R to reset level.");
             ImGui::Text("Alive breakable blocks: %d", aliveBreakables);
-            ImGui::Text("Fragments created: %d", _physics.FragmentsCreated);
+            ImGui::Text("Fragments created: %d", _world.Rigid.FragmentsCreated);
         }
     }
 
@@ -179,10 +217,12 @@ namespace VCX::Labs::Final {
             for (int i = 0; i < steps; ++i) {
                 StepSimulation(frameDt / float(steps));
             }
+            _world.StepFluid(frameDt);
         }
 
         _cameraManager.Update(_camera);
         DrawScene(desiredSize);
+        DrawHUD();
 
         return Common::CaseRenderResult {
             .Fixed     = false,
@@ -206,22 +246,28 @@ namespace VCX::Labs::Final {
         _birdLaunched = false;
         _birdMovingToSlingshot = false;
         _dragPosition = _scene.Anchor;
-        _birdQueue = _scene.Reset(_physics, _breakThreshold, static_cast<LevelRegister::LevelID>(_levelIndex));
+        _birdQueue = _scene.Reset(_world, _breakThreshold, static_cast<LevelRegister::LevelID>(_levelIndex));
         _activeBirdSlot = 0;
         _timeSinceBirdLaunch = 0.f;
         _birdMoveTime = 0.f;
+        _gameState = GameState::Playing;
+        _score = 0;
+        _shotsUsed = 0;
+        _wonAwarded = false;
+        _prevTargets = CountAliveTargets(_world);
+        _prevBlocks = CountAliveBreakables(_world);
 
         for (std::size_t i = 0; i < _birdQueue.size(); ++i) {
             glm::vec3 const position = i == 0 ? _scene.Anchor : BirdWaitingPosition(i);
-            _physics.AddBird(position, _birdQueue[i], int(i));
+            _world.Rigid.AddBird(position, _birdQueue[i], int(i));
         }
         _birdIndex = FindBirdBySlot(_activeBirdSlot);
         _gameStarted = false;
     }
 
     int CaseAngryBirds3D::FindBirdBySlot(std::size_t slot) const {
-        for (int i = 0; i < int(_physics.Bodies.size()); ++i) {
-            auto const & body = _physics.Bodies[i];
+        for (int i = 0; i < int(_world.Rigid.Bodies.size()); ++i) {
+            auto const & body = _world.Rigid.Bodies[i];
             if (body.IsAlive && body.Kind == BodyKind::Bird && body.BirdSlot == int(slot)) {
                 return i;
             }
@@ -254,7 +300,7 @@ namespace VCX::Labs::Final {
                     _birdLaunched = false;
                     _dragging = false;
                     _dragPosition = _scene.Anchor;
-                    _birdMoveStart = _physics.Bodies[_birdIndex].Position;
+                    _birdMoveStart = _world.Rigid.Bodies[_birdIndex].Position;
                     _birdMoveTime = 0.f;
                 }
             }
@@ -262,8 +308,8 @@ namespace VCX::Labs::Final {
 
         std::vector<PinnedBody> pinnedBodies;
         pinnedBodies.reserve(_birdQueue.size());
-        for (int i = 0; i < int(_physics.Bodies.size()); ++i) {
-            auto const & body = _physics.Bodies[i];
+        for (int i = 0; i < int(_world.Rigid.Bodies.size()); ++i) {
+            auto const & body = _world.Rigid.Bodies[i];
             if (!body.IsAlive || body.Kind != BodyKind::Bird || body.BirdSlot < 0) continue;
 
             std::size_t const slot = std::size_t(body.BirdSlot);
@@ -289,16 +335,40 @@ namespace VCX::Labs::Final {
             pinnedBodies.push_back(PinnedBody { i, position });
         }
 
-        _physics.Step(dt, pinnedBodies);
+        int const buoyancySkip = (_birdLaunched && _birdIndex >= 0) ? _birdIndex : -1;
+        _world.StepRigid(dt, pinnedBodies, buoyancySkip);
+
+        if (_birdLaunched && _birdIndex >= 0 && _birdIndex < int(_world.Rigid.Bodies.size())) {
+            auto & bird = _world.Rigid.Bodies[_birdIndex];
+            if (bird.IsAlive && bird.Bird == BirdType::WaterBalloon) {
+                bool const inWater = _world.Fluid && _world.Fluid->InsideTankXZ(bird.Position)
+                    && bird.Position.y < _world.Fluid->SurfaceWorldY(bird.Position.x, bird.Position.z);
+                if (bird.LastImpact > 2.0f || inWater) {
+                    BurstWaterBalloon(_birdIndex);
+                    _birdIndex = -1;
+                }
+            }
+        }
 
         if (!_birdLaunched) {
             _birdIndex = FindBirdBySlot(_activeBirdSlot);
         }
+
+        auto level = LevelRegister::GetInstance().GetLevel(static_cast<LevelRegister::LevelID>(_levelIndex));
+        if (level) {
+            level->Tick(_world, dt);
+            _gameState = level->Status(_world);
+            if (_gameState == GameState::Won && !_wonAwarded) {
+                _score += 1000;
+                _wonAwarded = true;
+            }
+        }
+        UpdateScore();
     }
 
     void CaseAngryBirds3D::LaunchBird() {
-        if (_birdMovingToSlingshot || _birdIndex < 0 || _birdIndex >= int(_physics.Bodies.size())) return;
-        auto & bird = _physics.Bodies[_birdIndex];
+        if (_birdMovingToSlingshot || _birdIndex < 0 || _birdIndex >= int(_world.Rigid.Bodies.size())) return;
+        auto & bird = _world.Rigid.Bodies[_birdIndex];
         glm::vec3 pull = _scene.Anchor - _dragPosition;
         pull.z = 0.f;
         float launchSpeedScale = 1.f;
@@ -306,6 +376,8 @@ namespace VCX::Labs::Final {
             launchSpeedScale = 1.3f;
         } else if (bird.Bird == BirdType::Speed) {
             launchSpeedScale = 1.5f;
+        } else if (bird.Bird == BirdType::WaterBalloon) {
+            launchSpeedScale = 0.85f;
         }
         bird.Position = ClampBirdPositionAboveGround(_dragPosition);
         bird.Velocity = pull * _powerScale * launchSpeedScale;
@@ -320,12 +392,13 @@ namespace VCX::Labs::Final {
         _birdLaunched = true;
         _timeSinceBirdLaunch = 0.f;
         _gameStarted = false;
+        _shotsUsed++;
     }
 
     void CaseAngryBirds3D::ActivateBoomerangBird() {
-        if (!_birdLaunched || _birdIndex < 0 || _birdIndex >= int(_physics.Bodies.size())) return;
+        if (!_birdLaunched || _birdIndex < 0 || _birdIndex >= int(_world.Rigid.Bodies.size())) return;
 
-        auto & bird = _physics.Bodies[_birdIndex];
+        auto & bird = _world.Rigid.Bodies[_birdIndex];
         if (bird.Kind != BodyKind::Bird || bird.Bird != BirdType::Boomerang || bird.BirdHasCollided) return;
 
         constexpr float BoomerangAcceleration = 26.f;
@@ -454,9 +527,13 @@ namespace VCX::Labs::Final {
         _lineProgram.GetUniforms().SetByName("u_View", view);
 
         gl_using(_frame);
+        DrawSky();
+
         glEnable(GL_DEPTH_TEST);
         glEnable(GL_LINE_SMOOTH);
         glLineWidth(1.2f);
+
+        DrawScenery();
 
         constexpr float GroundRenderHalfExtent = 80.f;
         constexpr float GroundRenderThickness  = .06f;
@@ -469,7 +546,7 @@ namespace VCX::Labs::Final {
         ground.Color = glm::vec3(1.f);
         DrawBox(ground);
 
-        for (auto const & body : _physics.Bodies) {
+        for (auto const & body : _world.Rigid.Bodies) {
             if (!body.IsAlive) continue;
             if (body.Alpha < .999f) continue;
             if (body.Kind == BodyKind::Bird) {
@@ -482,12 +559,18 @@ namespace VCX::Labs::Final {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
-        for (auto const & body : _physics.Bodies) {
+        for (auto const & body : _world.Rigid.Bodies) {
             if (!body.IsAlive || body.Alpha >= .999f) continue;
-            DrawBox(body);
+            if (body.Kind == BodyKind::Bird) {
+                DrawSphere(body);
+            } else {
+                DrawBox(body);
+            }
         }
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
+
+        DrawFluid();
 
         glLineWidth(3.2f);
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.08f, .035f, .015f));
@@ -565,7 +648,7 @@ namespace VCX::Labs::Final {
         }
 
         _program.GetUniforms().SetByName("u_Color", body.Color);
-        _program.GetUniforms().SetByName("u_Alpha", 1.f);
+        _program.GetUniforms().SetByName("u_Alpha", body.Alpha);
         _sphereItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<Vertex>(vertices));
         _sphereItem.Draw({ _diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() }, vertices.size());
     }
@@ -581,8 +664,8 @@ namespace VCX::Labs::Final {
         if (!_dragging) return;
         glm::vec3 pos = _dragPosition;
         float launchSpeedScale = 1.f;
-        if (_birdIndex >= 0 && _birdIndex < int(_physics.Bodies.size())) {
-            auto const & bird = _physics.Bodies[_birdIndex];
+        if (_birdIndex >= 0 && _birdIndex < int(_world.Rigid.Bodies.size())) {
+            auto const & bird = _world.Rigid.Bodies[_birdIndex];
             if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::Speed) {
                 launchSpeedScale = 1.5f;
             } else if (bird.Kind == BodyKind::Bird && bird.Bird == BirdType::Boomerang) {
@@ -592,11 +675,130 @@ namespace VCX::Labs::Final {
         glm::vec3 vel = (_scene.Anchor - _dragPosition) * _powerScale * launchSpeedScale;
         glm::vec3 prev = pos;
         for (int i = 0; i < 32; ++i) {
-            vel += _physics.Gravity * .07f;
+            vel += _world.Rigid.Gravity * .07f;
             pos += vel * .07f;
             DrawLine(prev, pos, glm::vec3(1.f, .86f, .25f));
             prev = pos;
             if (pos.y < GroundY) break;
         }
+    }
+
+    void CaseAngryBirds3D::BurstWaterBalloon(int index) {
+        if (index < 0 || index >= int(_world.Rigid.Bodies.size())) return;
+        RigidBody & b = _world.Rigid.Bodies[index];
+        glm::vec3 const pos = b.Position;
+        glm::vec3 const vel = b.Velocity;
+        b.IsAlive = false;
+
+        if (_world.Fluid && _world.Fluid->InsideTankXZ(pos)) {
+            int const count = 180;
+            float const spread = 1.2f * WorldScale;
+            for (int i = 0; i < count; ++i) {
+                glm::vec3 const r(frand2(), frand2(), frand2());
+                glm::vec3 const off = r * (b.Radius * 0.9f);
+                glm::vec3 const pv = vel * 0.35f + r * spread;
+                _world.Fluid->AddParticleWorld(pos + off, pv);
+            }
+        }
+    }
+
+    void CaseAngryBirds3D::UpdateScore() {
+        int curTargets = CountAliveTargets(_world);
+        int curBlocks = CountAliveBreakables(_world);
+        if (curTargets < _prevTargets) _score += (_prevTargets - curTargets) * 500;
+        if (curBlocks < _prevBlocks) _score += (_prevBlocks - curBlocks) * 100;
+        _prevTargets = curTargets;
+        _prevBlocks = curBlocks;
+    }
+
+    void CaseAngryBirds3D::DrawSky() {
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        _skyProgram.GetUniforms().SetByName("u_Top", glm::vec3(.33f, .55f, .85f));
+        _skyProgram.GetUniforms().SetByName("u_Bottom", glm::vec3(.82f, .91f, .98f));
+        _skyItem.Draw({ _skyProgram.Use() });
+        glDepthMask(GL_TRUE);
+        glEnable(GL_DEPTH_TEST);
+    }
+
+    void CaseAngryBirds3D::DrawScenery() {
+        auto sphere = [&](glm::vec3 pos, float r, glm::vec3 col) {
+            RigidBody b;
+            b.Position = pos * WorldScale;
+            b.Radius = r * WorldScale;
+            b.Color = col;
+            b.Scale = 1.f;
+            DrawSphere(b);
+        };
+
+        sphere({ -3.f, -4.0f, -13.f }, 9.5f, glm::vec3(.30f, .52f, .28f));
+        sphere({ 13.f, -4.5f, -15.f }, 11.0f, glm::vec3(.25f, .47f, .24f));
+        sphere({ 5.f, -5.0f, -20.f }, 13.0f, glm::vec3(.22f, .42f, .26f));
+        sphere({ -8.f, 5.5f, -18.f }, 4.5f, glm::vec3(.95f, .97f, 1.f));
+        sphere({ 2.f, 6.0f, -22.f }, 5.5f, glm::vec3(.92f, .95f, 1.f));
+        sphere({ 10.f, 5.0f, -16.f }, 4.0f, glm::vec3(.94f, .96f, 1.f));
+    }
+
+    void CaseAngryBirds3D::DrawFluid() {
+        if (!_world.Fluid) return;
+        FluidWorld const & fluid = *_world.Fluid;
+
+        int const n = fluid.ParticleCount();
+        if (n > 0) {
+            std::vector<FluidVertex> verts;
+            verts.reserve(n);
+            for (int i = 0; i < n; ++i) {
+                verts.push_back(FluidVertex { fluid.ParticleWorld(i), fluid.Solver.m_particleColor[i] });
+            }
+            _pointProgram.GetUniforms().SetByName("u_Projection",
+                _camera.GetProjectionMatrix(float(_frame.GetSize().first) / float(_frame.GetSize().second)));
+            _pointProgram.GetUniforms().SetByName("u_View", _camera.GetViewMatrix());
+            _fluidItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<FluidVertex>(verts));
+            glPointSize(7.f);
+            _fluidItem.Draw({ _pointProgram.Use() });
+            glPointSize(1.f);
+        }
+
+        glm::vec3 const lo = fluid.BoxMin();
+        glm::vec3 const hi = fluid.BoxMax();
+        glm::vec3 const edgeColor(.2f, .5f, .7f);
+        glm::vec3 const v[8] = {
+            { lo.x, lo.y, lo.z }, { hi.x, lo.y, lo.z }, { hi.x, lo.y, hi.z }, { lo.x, lo.y, hi.z },
+            { lo.x, hi.y, lo.z }, { hi.x, hi.y, lo.z }, { hi.x, hi.y, hi.z }, { lo.x, hi.y, hi.z },
+        };
+        int const edges[12][2] = {
+            {0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}
+        };
+        for (auto const & e : edges) {
+            DrawLine(v[e[0]], v[e[1]], edgeColor);
+        }
+    }
+
+    void CaseAngryBirds3D::DrawHUD() {
+        ImGuiViewport const * vp = ImGui::GetMainViewport();
+        ImDrawList * dl = ImGui::GetForegroundDrawList();
+        ImFont * font = ImGui::GetIO().Fonts->Fonts[0];
+
+        float const cx = vp->Pos.x + vp->Size.x * 0.5f;
+        float const top = vp->Pos.y + 14.f;
+
+        std::string const scoreStr = "SCORE  " + std::to_string(_score);
+        float const bigSize = 34.f;
+        ImVec2 const ssz = font->CalcTextSizeA(bigSize, FLT_MAX, 0.f, scoreStr.c_str());
+
+        int targetsLeft = CountAliveTargets(_world);
+        std::string const subStr = "Targets " + std::to_string(targetsLeft) + "     Shots " + std::to_string(_shotsUsed);
+        float const subSize = 18.f;
+        ImVec2 const subsz = font->CalcTextSizeA(subSize, FLT_MAX, 0.f, subStr.c_str());
+
+        float const boxW = std::max(ssz.x, subsz.x) + 48.f;
+        float const boxH = bigSize + subSize + 24.f;
+        ImVec2 const p0(cx - boxW * 0.5f, top);
+        ImVec2 const p1(cx + boxW * 0.5f, top + boxH);
+        dl->AddRectFilled(p0, p1, IM_COL32(18, 22, 30, 175), 10.f);
+        dl->AddRect(p0, p1, IM_COL32(255, 255, 255, 45), 10.f);
+
+        dl->AddText(font, bigSize, ImVec2(cx - ssz.x * 0.5f, top + 8.f), IM_COL32(255, 220, 80, 255), scoreStr.c_str());
+        dl->AddText(font, subSize, ImVec2(cx - subsz.x * 0.5f, top + 8.f + bigSize + 4.f), IM_COL32(220, 230, 240, 230), subStr.c_str());
     }
 } // namespace VCX::Labs::Final

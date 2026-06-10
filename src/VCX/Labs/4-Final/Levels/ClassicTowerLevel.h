@@ -1,13 +1,15 @@
 #pragma once
 
 #include "Labs/4-Final/Levels/ILevel.h"
+#include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    /// @brief 经典塔关卡
     struct ClassicTowerLevel : ILevel {
-        void Setup(AngryBirdsPhysics & physics, float breakThreshold) const override;
+        std::string_view Name() const override { return "Classic Tower"; }
+        void Setup(World & world, float breakThreshold) const override;
         std::vector<BirdType> GetBirds() const override {
             return { BirdType::Normal, BirdType::Speed, BirdType::Normal };
         }
+        GameState Status(World const & world) const override { return TargetsClearedStatus(world); }
     };
 }

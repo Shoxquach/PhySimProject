@@ -20,6 +20,13 @@ namespace VCX::Labs::Final {
         Normal,
         Speed,
         Boomerang,
+        WaterBalloon,
+    };
+
+    enum class GameState {
+        Playing,
+        Won,
+        Lost,
     };
 
     struct RigidBody {
@@ -49,6 +56,7 @@ namespace VCX::Labs::Final {
         float     LifeTime   = -1.f;
         float     Scale      = 1.f;
         glm::mat3 InvInertiaLocal = glm::mat3(0.f);
+        float     LastImpact = 0.f;
     };
 
     struct Contact {

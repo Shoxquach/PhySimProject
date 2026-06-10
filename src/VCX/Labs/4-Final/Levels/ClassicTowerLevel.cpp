@@ -2,8 +2,8 @@
 #include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    void ClassicTowerLevel::Setup(AngryBirdsPhysics & physics, float breakThreshold) const {
-        LevelBuilder builder(physics, breakThreshold);
+    void ClassicTowerLevel::Setup(World & world, float breakThreshold) const {
+        LevelBuilder builder(world.Rigid, breakThreshold);
 
         for (int i = 0; i < 3; ++i) {
             float const x = 2.8f + float(i) * 1.15f;

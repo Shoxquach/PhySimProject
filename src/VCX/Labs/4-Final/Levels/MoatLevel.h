@@ -4,11 +4,11 @@
 #include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    struct StoneCastleLevel : ILevel {
-        std::string_view Name() const override { return "Stone Castle"; }
+    struct MoatLevel : ILevel {
+        std::string_view Name() const override { return "Moat (Buoyancy)"; }
         void Setup(World & world, float breakThreshold) const override;
         std::vector<BirdType> GetBirds() const override {
-            return { BirdType::Normal, BirdType::Speed, BirdType::Speed, BirdType::Normal, BirdType::Boomerang };
+            return { BirdType::Normal, BirdType::Speed, BirdType::WaterBalloon };
         }
         GameState Status(World const & world) const override { return TargetsClearedStatus(world); }
     };

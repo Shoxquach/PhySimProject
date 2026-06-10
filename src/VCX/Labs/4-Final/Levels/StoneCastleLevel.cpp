@@ -2,8 +2,8 @@
 #include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    void StoneCastleLevel::Setup(AngryBirdsPhysics & physics, float breakThreshold) const {
-        LevelBuilder builder(physics, breakThreshold);
+    void StoneCastleLevel::Setup(World & world, float breakThreshold) const {
+        LevelBuilder builder(world.Rigid, breakThreshold);
 
         // Main keep
         builder.AddWood(glm::vec3(3.35f, .18f, 0.f), glm::vec3(1.3f, .18f, 1.05f));

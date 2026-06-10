@@ -2,8 +2,8 @@
 #include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    void GrandCitadelLevel::Setup(AngryBirdsPhysics & physics, float breakThreshold) const {
-        LevelBuilder b(physics, breakThreshold);
+    void GrandCitadelLevel::Setup(World & world, float breakThreshold) const {
+        LevelBuilder b(world.Rigid, breakThreshold);
 
         // Box center positions; bottom = y - halfSize.y. Ground at y = 0.
         // Each stacked block: centerY = supportTop + halfSize.y.

@@ -2,8 +2,8 @@
 #include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    void BoomerangChallengeLevel::Setup(AngryBirdsPhysics & physics, float breakThreshold) const {
-        LevelBuilder builder(physics, breakThreshold);
+    void BoomerangChallengeLevel::Setup(World & world, float breakThreshold) const {
+        LevelBuilder builder(world.Rigid, breakThreshold);
 
         builder.AddStone(glm::vec3(3.7f, 1.3f, 0.f), glm::vec3(.68f, 1.3f, 1.1f), 2.2f);
         builder.AddTarget(glm::vec3(4.66f, .34f, 0.f), glm::vec3(.28f, .28f, .28f), .32f);

@@ -32,11 +32,20 @@ namespace VCX::Labs::Final {
             bird.Color = glm::vec3(1.f, .82f, .08f);
         } else if (birdType == BirdType::Boomerang) {
             bird.Color = glm::vec3(.18f, .72f, .95f);
+        } else if (birdType == BirdType::WaterBalloon) {
+            bird.Mass = 0.9f;
+            bird.InvMass = 1.f / bird.Mass;
+            bird.Color = glm::vec3(.15f, .55f, 1.f);
+            bird.Alpha = 0.75f;
+            bird.Breakable = false;
+            bird.Toughness = 1.5f;
         } else {
             bird.Color = glm::vec3(.9f, .12f, .08f);
         }
-        bird.Breakable = false;
-        bird.Toughness = 100.f;
+        if (birdType != BirdType::WaterBalloon) {
+            bird.Breakable = false;
+            bird.Toughness = 100.f;
+        }
         bird.Age = 0.f;
         bird.LifeTime = -1.f;
         {
@@ -87,6 +96,10 @@ namespace VCX::Labs::Final {
             body.Velocity = glm::vec3(0.f);
             body.AngularVel = glm::vec3(0.f);
             body.Rotation = glm::quat(1.f, 0.f, 0.f, 0.f);
+        }
+
+        for (auto & body : Bodies) {
+            body.LastImpact = 0.f;
         }
 
         Integrate(dt, pinnedBodies);
@@ -150,5 +163,14 @@ namespace VCX::Labs::Final {
             ImpulseSolver::ResolveCollisions(Bodies, Restitution, Friction, impactContacts);
         }
         BreakSolver::TryBreakBodies(Bodies, impactContacts, FragmentsCreated);
+
+        for (auto const & c : impactContacts) {
+            if (c.A >= 0 && c.A < int(Bodies.size())) {
+                Bodies[c.A].LastImpact = std::max(Bodies[c.A].LastImpact, c.Impact);
+            }
+            if (c.B >= 0 && c.B < int(Bodies.size())) {
+                Bodies[c.B].LastImpact = std::max(Bodies[c.B].LastImpact, c.Impact);
+            }
+        }
     }
 }

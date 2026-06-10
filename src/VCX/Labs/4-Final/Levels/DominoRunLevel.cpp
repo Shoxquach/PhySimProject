@@ -2,8 +2,8 @@
 #include "Labs/4-Final/Levels/LevelCommon.h"
 
 namespace VCX::Labs::Final {
-    void DominoRunLevel::Setup(AngryBirdsPhysics & physics, float breakThreshold) const {
-        LevelBuilder builder(physics, breakThreshold);
+    void DominoRunLevel::Setup(World & world, float breakThreshold) const {
+        LevelBuilder builder(world.Rigid, breakThreshold);
 
         builder.AddStone(glm::vec3(-.46f, 1.f, 0.f), glm::vec3(1.f, 1.f, 1.f));
         builder.AddStone(glm::vec3(0.f, 2.2f, 0.f), glm::vec3(1.76f, .2f, 1.f));
