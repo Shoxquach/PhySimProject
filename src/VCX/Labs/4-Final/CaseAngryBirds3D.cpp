@@ -88,6 +88,7 @@ namespace VCX::Labs::Final {
             "Target Practice",
             "Domino Run",
             "Boomerang Challenge",
+            "Grand Citadel",
         };
 
         if (ImGui::Combo("Level", &_levelIndex, LevelNames, IM_ARRAYSIZE(LevelNames))) {
@@ -229,7 +230,14 @@ namespace VCX::Labs::Final {
     }
 
     glm::vec3 CaseAngryBirds3D::BirdWaitingPosition(std::size_t slot) const {
-        return _scene.Anchor + glm::vec3(-1.0f - 0.95f * float(slot - 1), -1.35f, 0.82f);
+        float const queueIndex = slot > 0 ? float(slot - 1) : 0.f;
+        return ClampBirdPositionAboveGround(glm::vec3(-6.5f - 0.95f * queueIndex, GroundY + BirdRadius + 0.08f, 0.82f));
+    }
+
+    glm::vec3 CaseAngryBirds3D::ClampBirdPositionAboveGround(glm::vec3 position) const {
+        constexpr float GroundClearance = 0.08f;
+        position.y = std::max(position.y, GroundY + BirdRadius + GroundClearance);
+        return position;
     }
 
     void CaseAngryBirds3D::StepSimulation(float dt) {
@@ -277,6 +285,7 @@ namespace VCX::Labs::Final {
                 }
             }
 
+            position = ClampBirdPositionAboveGround(position);
             pinnedBodies.push_back(PinnedBody { i, position });
         }
 
@@ -298,7 +307,7 @@ namespace VCX::Labs::Final {
         } else if (bird.Bird == BirdType::Speed) {
             launchSpeedScale = 1.5f;
         }
-        bird.Position = _dragPosition;
+        bird.Position = ClampBirdPositionAboveGround(_dragPosition);
         bird.Velocity = pull * _powerScale * launchSpeedScale;
         bird.AngularVel = glm::vec3(0.f, 0.f, -glm::length(pull) * 8.f);
         bird.Age = 0.f;
@@ -352,6 +361,7 @@ namespace VCX::Labs::Final {
                 _dragPosition.x = _scene.Anchor.x + pullDir.x * maxPull;
                 _dragPosition.y = _scene.Anchor.y + pullDir.y * maxPull;
             }
+            _dragPosition = ClampBirdPositionAboveGround(_dragPosition);
         }
         if (_dragging && leftReleased) {
             LaunchBird();
@@ -427,8 +437,8 @@ namespace VCX::Labs::Final {
             .AmbientIntensity     = glm::vec3(2.5f),
             .Lights               = {
                 Rendering::SceneObject::Light {
-                    .Intensity  = glm::vec3(.55f),
-                    .Direction  = glm::normalize(glm::vec3(0.f, 1.f, 0.5f)),
+                    .Intensity  = glm::vec3(.7f),
+                    .Direction  = glm::normalize(glm::vec3(-0.25f, 1.f, 0.85f)),
                     .Position   = glm::vec3(0.f),
                     .CutOff     = 1.f,
                     .OuterCutOff= 0.f,
@@ -461,7 +471,7 @@ namespace VCX::Labs::Final {
 
         for (auto const & body : _physics.Bodies) {
             if (!body.IsAlive) continue;
-            if (body.Kind == BodyKind::Glass) continue;
+            if (body.Alpha < .999f) continue;
             if (body.Kind == BodyKind::Bird) {
                 DrawSphere(body);
             } else {
@@ -473,16 +483,19 @@ namespace VCX::Labs::Final {
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
         for (auto const & body : _physics.Bodies) {
-            if (!body.IsAlive || body.Kind != BodyKind::Glass) continue;
+            if (!body.IsAlive || body.Alpha >= .999f) continue;
             DrawBox(body);
         }
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
 
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.1f, .05f, .02f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.1f, .05f, .02f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _scene.Anchor + glm::vec3(0.f, -.5f, -.55f), glm::vec3(.32f, .16f, .06f));
-        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _scene.Anchor + glm::vec3(0.f, -.5f, .55f), glm::vec3(.32f, .16f, .06f));
+        glLineWidth(3.2f);
+        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.08f, .035f, .015f));
+        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _dragging ? _dragPosition : _scene.Anchor, glm::vec3(.08f, .035f, .015f));
+        glLineWidth(4.0f);
+        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _scene.Anchor + glm::vec3(0.f, -.5f, -.55f), glm::vec3(.38f, .19f, .07f));
+        DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _scene.Anchor + glm::vec3(0.f, -.5f, .55f), glm::vec3(.38f, .19f, .07f));
+        glLineWidth(1.2f);
         DrawTrajectoryPreview();
 
         glLineWidth(1.f);
@@ -506,8 +519,8 @@ namespace VCX::Labs::Final {
         };
 
         static std::array<glm::vec3, 6> const faceNormals = {
-            glm::vec3(0,  1,  0), glm::vec3(1,  0,  0), glm::vec3(0,  0,  1),
-            glm::vec3(-1, 0,  0), glm::vec3(0,  0, -1), glm::vec3(0, -1,  0),
+            glm::vec3(0,  1,  0), glm::vec3(1,  0,  0), glm::vec3(0, -1,  0),
+            glm::vec3(-1, 0,  0), glm::vec3(0,  0, -1), glm::vec3(0,  0,  1),
         };
 
         static std::array<glm::vec2, 4> const baseUvs = {
@@ -533,9 +546,9 @@ namespace VCX::Labs::Final {
             vertices.push_back(Vertex{ corners[indices[3]], normal, baseUvs[3] * uvScale, glm::vec3(0.f) });
         }
 
-        bool const isGlass = body.Kind == BodyKind::Glass;
-        _program.GetUniforms().SetByName("u_Color", isGlass ? body.Color * 1.35f : body.Color);
-        _program.GetUniforms().SetByName("u_Alpha", isGlass ? .45f : 1.f);
+        bool const isTransparent = body.Alpha < .999f;
+        _program.GetUniforms().SetByName("u_Color", isTransparent ? body.Color * 1.35f : body.Color);
+        _program.GetUniforms().SetByName("u_Alpha", body.Alpha);
         _boxItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<Vertex>(vertices));
         auto const & diffuseTexture = body.Kind == BodyKind::Ground ? _groundTexture : _diffuseTexture;
         _boxItem.Draw({ diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() });

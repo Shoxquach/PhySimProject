@@ -12,7 +12,7 @@
 #include "Engine/GL/Program.h"
 #include "Engine/GL/RenderItem.h"
 #include "Engine/GL/Texture.hpp"
-#include "Labs/4-Final/AngryBirdsPhysics.h"
+#include "Labs/4-Final/Physics/PhysicsSystem.h"
 #include "Labs/4-Final/AngryBirdsScene.h"
 #include "Labs/Scene/SceneObject.h"
 #include "Labs/Common/ICase.h"
@@ -71,12 +71,13 @@ namespace VCX::Labs::Final {
         float _powerScale        = 6.f;
         float _breakThreshold    = 7.f;
         int   _substeps          = 6;
-        glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.35f, 0.f);
+        glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.65f, 0.f);
         glm::vec3 _birdMoveStart = glm::vec3(0.f);
 
         void ResetScene();
         int  FindBirdBySlot(std::size_t slot) const;
         glm::vec3 BirdWaitingPosition(std::size_t slot) const;
+        glm::vec3 ClampBirdPositionAboveGround(glm::vec3 position) const;
         void StepSimulation(float dt);
         void LaunchBird();
         void ActivateBoomerangBird();

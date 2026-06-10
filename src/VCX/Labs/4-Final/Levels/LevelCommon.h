@@ -1,7 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
-#include "Labs/4-Final/AngryBirdsPhysics.h"
+#include "Labs/4-Final/Physics/PhysicsSystem.h"
 
 namespace VCX::Labs::Final {
     // Material colors for level blocks

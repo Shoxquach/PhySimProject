@@ -2,7 +2,7 @@
 
 #include <vector>
 
-#include "Labs/4-Final/AngryBirdsPhysics.h"
+#include "Labs/4-Final/Physics/PhysicsSystem.h"
 
 namespace VCX::Labs::Final {
     /// @brief 关卡基接口

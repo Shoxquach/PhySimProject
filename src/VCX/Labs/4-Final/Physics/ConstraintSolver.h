@@ -4,11 +4,9 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "Labs/4-Final/Physics/PhysicsTypes.h"
+
 namespace VCX::Labs::Final {
-
-    struct RigidBody;
-    struct Contact;
-
     enum class SolverType {
         SequentialImpulse,
         ConstraintBasedJacobi
@@ -56,6 +54,13 @@ namespace VCX::Labs::Final {
             int iterations = 12
         );
 
+        void ResolveCollisions(
+            std::vector<RigidBody>& bodies,
+            float restitution,
+            float friction,
+            std::vector<Contact>& impactContacts
+        );
+
         void SetPositionCorrectionEnabled(bool enabled) { m_PositionCorrectionEnabled = enabled; }
         void SetWarmStartingEnabled(bool enabled) { m_WarmStartingEnabled = enabled; }
 
@@ -87,8 +92,11 @@ namespace VCX::Labs::Final {
         bool m_WarmStartingEnabled = true;
         
         static constexpr float c_ContactSlop = 0.005f;
-        static constexpr float c_PositionCorrectionFactor = 0.72f;
-        static constexpr float c_BiasFactor = 0.1f;
+        static constexpr float c_PositionCorrectionFactor = 0.25f;
+        static constexpr float c_MaxPositionCorrection = 0.04f;
+        static constexpr float c_JacobiRelaxation = 0.45f;
+        static constexpr float c_RestitutionVelocityThreshold = 2.0f;
+        static constexpr float c_MaxJacobiRestitution = 0.12f;
     };
 
 }
