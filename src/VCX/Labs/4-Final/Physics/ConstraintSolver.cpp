@@ -7,7 +7,6 @@
 #include "Labs/4-Final/Physics/ContactDetection.h"
 
 namespace VCX::Labs::Final {
-
     namespace {
         glm::mat3 ComputeWorldInvInertia(const RigidBody& body) {
             if (body.IsStatic || body.InvMass <= 0.f) return glm::mat3(0.f);
