@@ -85,30 +85,53 @@ namespace VCX::Labs::Final {
             RigidBody & b = rigid.Bodies[i];
             if (!IsCouplingBody(b)) continue;
 
-            int in = 0, total = 0;
-            for (int ix = -1; ix <= 1; ++ix)
-                for (int iy = -1; iy <= 1; ++iy)
-                    for (int iz = -1; iz <= 1; ++iz) {
-                        glm::vec3 const s = glm::vec3(ix, iy, iz) * 0.6f;
-                        glm::vec3 p = IsSphere(b) ? b.Position + s * b.Radius * b.Scale
-                                                  : b.Position + b.Rotation * (s * b.HalfSize * b.Scale);
-                        ++total;
-                        if (fluid.InsideTankXZ(p) && p.y < fluid.SurfaceWorldY(p.x, p.z)) ++in;
-                    }
-            float const frac = total > 0 ? float(in) / float(total) : 0.f;
-            if (frac <= 0.f) continue;
-
-            float const vol = BodyVolume(b);
+            float const vol         = BodyVolume(b);
             float const bodyDensity = vol > 1e-6f ? b.Mass / vol : 1.f;
-            float const ratio = fluid.Density / std::max(bodyDensity, 1e-4f);
+            // Only apply buoyancy to objects lighter than water
+            if (bodyDensity >= fluid.Density) continue;
 
-            b.Velocity -= rigid.Gravity * (ratio * frac) * dt;
+            // Check if body is inside the tank (at least partially)
+            if (!fluid.InsideTankXZ(b.Position)) continue;
+            float const surfaceY = fluid.SurfaceWorldY(b.Position.x, b.Position.z);
+            // Body entirely above water surface → no buoyancy
+            float const bodyBottom = IsSphere(b) ? b.Position.y - b.Radius * b.Scale
+                                                 : b.Position.y - b.HalfSize.y * b.Scale;
+            if (bodyBottom >= surfaceY) continue;
 
-            glm::vec3 const fv = fluid.FlowVelocityWorld(b.Position);
-            float const k = std::clamp(2.5f * frac * dt, 0.f, 0.7f);
-            b.Velocity += (fv - b.Velocity) * k;
+            // ---- Analytical equilibrium buoyancy (spring-damper) ----
+            float const bodyHeight  = IsSphere(b) ? 2.f * b.Radius * b.Scale
+                                                  : 2.f * b.HalfSize.y * b.Scale;
+            float const fracEq      = bodyDensity / fluid.Density; // submerged fraction at rest
+            float const targetY     = surfaceY - bodyHeight * (fracEq - 0.5f);
 
-            float const angDrag = std::clamp(2.0f * frac * dt, 0.f, 0.8f);
+            // Critically-damped harmonic oscillator: d = 2·√(k·m)
+            float const springK     = 80.f;
+            float const dampingC    = 2.f * std::sqrt(springK * b.Mass);
+            float const displacement = targetY - b.Position.y;
+            float const springForce  = springK * displacement;
+            float const dampingForce = dampingC * b.Velocity.y;
+            b.Velocity.y += (springForce - dampingForce) * b.InvMass * dt;
+
+            // Lateral drag in water (keep object from drifting horizontally)
+            float const lateralDrag = std::clamp(4.f * fracEq * dt, 0.f, 0.55f);
+            b.Velocity.x *= (1.f - lateralDrag);
+            b.Velocity.z *= (1.f - lateralDrag);
+
+            // Soft containment near tank edges
+            float const marginX = (fluid.BoxMax().x - fluid.BoxMin().x) * 0.08f;
+            float const marginZ = (fluid.BoxMax().z - fluid.BoxMin().z) * 0.08f;
+            float const edgeK   = 6.f;
+            if (b.Position.x < fluid.BoxMin().x + marginX)
+                b.Velocity.x += edgeK * (fluid.BoxMin().x + marginX - b.Position.x) * dt;
+            if (b.Position.x > fluid.BoxMax().x - marginX)
+                b.Velocity.x -= edgeK * (b.Position.x - fluid.BoxMax().x + marginX) * dt;
+            if (b.Position.z < fluid.BoxMin().z + marginZ)
+                b.Velocity.z += edgeK * (fluid.BoxMin().z + marginZ - b.Position.z) * dt;
+            if (b.Position.z > fluid.BoxMax().z - marginZ)
+                b.Velocity.z -= edgeK * (b.Position.z - fluid.BoxMax().z + marginZ) * dt;
+
+            // Angular drag
+            float const angDrag = std::clamp(5.f * fracEq * dt, 0.f, 0.9f);
             b.AngularVel *= (1.f - angDrag);
         }
     }
@@ -121,6 +144,12 @@ namespace VCX::Labs::Final {
 
         for (RigidBody const & b : rigid.Bodies) {
             if (!b.IsAlive || b.Kind == BodyKind::Fragment) continue;
+
+            // Skip floating bodies (density < fluid): they don't block water,
+            // preventing pressure artifacts that push them out of the tank.
+            float const vol         = BodyVolume(b);
+            float const bodyDensity = vol > 1e-6f ? b.Mass / vol : 1.f;
+            if (bodyDensity < fluid.Density * 0.98f) continue;
 
             glm::vec3 const ext = WorldExtent(b);
             glm::vec3 const aMin = b.Position - ext;

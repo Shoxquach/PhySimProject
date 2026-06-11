@@ -8,7 +8,7 @@ namespace VCX::Labs::Final {
         std::string_view Name() const override { return "Moat (Buoyancy)"; }
         void Setup(World & world, float breakThreshold) const override;
         std::vector<BirdType> GetBirds() const override {
-            return { BirdType::Normal, BirdType::Speed, BirdType::WaterBalloon };
+            return { BirdType::Normal, BirdType::Speed, BirdType::WaterBalloon, BirdType::WaterBalloon, BirdType::Speed };
         }
         GameState Status(World const & world) const override { return TargetsClearedStatus(world); }
     };
