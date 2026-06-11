@@ -19,12 +19,12 @@ namespace VCX::Labs::Final {
         // Side towers
         builder.AddStone(glm::vec3(1.6f, .52f, 0.f), glm::vec3(.42f, .52f, .55f));
         builder.AddStone(glm::vec3(1.6f, 1.48f, 0.f), glm::vec3(.34f, .44f, .48f));
-        builder.AddWood(glm::vec3(1.6f, 2.1f, 0.f), glm::vec3(.38f, .18f, .62f));
+        builder.AddGlass(glm::vec3(1.6f, 2.1f, 0.f), glm::vec3(.38f, .18f, .62f));
         builder.AddStone(glm::vec3(1.6f, 2.56f, 0.f), glm::vec3(.38f, .28f, .38f));
 
         builder.AddStone(glm::vec3(5.1f, .52f, 0.f), glm::vec3(.42f, .52f, .55f));
         builder.AddStone(glm::vec3(5.1f, 1.48f, 0.f), glm::vec3(.34f, .44f, .48f));
-        builder.AddWood(glm::vec3(5.1f, 2.1f, 0.f), glm::vec3(.38f, .18f, .62f));
+        builder.AddGlass(glm::vec3(5.1f, 2.1f, 0.f), glm::vec3(.38f, .18f, .62f));
         builder.AddStone(glm::vec3(5.1f, 2.56f, 0.f), glm::vec3(.38f, .28f, .38f));
 
         // Extra front and rear cover

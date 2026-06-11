@@ -73,7 +73,8 @@ namespace VCX::Labs::Final {
         );
 
         void ApplyPositionCorrection(std::vector<RigidBody>& bodies, const std::vector<Contact>& contacts);
-        void SolveVelocityConstraints(const std::vector<RigidBody>& bodies);
+        void SolveNormalConstraintsJacobi(const std::vector<RigidBody>& bodies);
+        void SolveFrictionConstraintsJacobi(const std::vector<RigidBody>& bodies);
         void ApplyImpulses(std::vector<RigidBody>& bodies);
 
         void ComputeTangents(const glm::vec3& normal, glm::vec3& tangent1, glm::vec3& tangent2);
@@ -87,14 +88,21 @@ namespace VCX::Labs::Final {
         std::vector<ContactConstraint> m_Constraints;
         std::vector<VelocityState> m_VelocityStates;
         std::vector<glm::mat3> m_InvInertias;
+        std::vector<glm::vec3> m_DeltaVelocities;
+        std::vector<glm::vec3> m_DeltaAngularVelocities;
+        std::vector<glm::vec3> m_DeltaPositions;
         
         bool m_PositionCorrectionEnabled = true;
         bool m_WarmStartingEnabled = true;
         
+        static constexpr int   c_OuterIterations = 10;
+        static constexpr int   c_VelocityIterations = 6;
         static constexpr float c_ContactSlop = 0.005f;
-        static constexpr float c_PositionCorrectionFactor = 0.25f;
-        static constexpr float c_MaxPositionCorrection = 0.04f;
+        static constexpr float c_PositionCorrectionFactor = 0.45f;
+        static constexpr float c_MaxPositionCorrection = 0.05f;
+        static constexpr float c_PositionRelaxation = 0.5f;
         static constexpr float c_JacobiRelaxation = 0.45f;
+        static constexpr float c_BaumgarteFactor = 0.18f;
         static constexpr float c_RestitutionVelocityThreshold = 2.0f;
         static constexpr float c_MaxJacobiRestitution = 0.12f;
     };

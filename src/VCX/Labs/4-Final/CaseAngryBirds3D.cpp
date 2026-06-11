@@ -141,11 +141,12 @@ namespace VCX::Labs::Final {
         }
 
         ImGui::Spacing();
-        ImGui::TextDisabled("Camera: Left-drag=rotate  Right-drag=pan  Wheel=zoom  WASD=pan");
+        ImGui::TextDisabled("Camera: Left-drag=rotate  Right-drag=pan  Wheel=zoom");
         if (!_gameStarted) {
             ImGui::TextColored(ImVec4(1.f, 1.f, 0.f, 1.f), "Press S to start");
         } else {
             ImGui::TextColored(ImVec4(0.f, 1.f, 0.f, 1.f), "Ready - drag the bird to launch");
+            ImGui::TextDisabled("A/D = rotate launch plane (+-10 deg)");
         }
         if (_birdIndex >= 0 && _birdIndex < int(_world.Rigid.Bodies.size())) {
             auto const & bird = _world.Rigid.Bodies[_birdIndex];
@@ -220,6 +221,9 @@ namespace VCX::Labs::Final {
         }
 
         float const frameDt = std::min(Engine::GetDeltaTime(), 1.f / 30.f);
+        if (_gameStarted && !_birdLaunched && !_birdMovingToSlingshot) {
+            UpdateLaunchPlaneRotation(frameDt);
+        }
         if (!_pause) {
             int const steps = std::max(_substeps, 1);
             for (int i = 0; i < steps; ++i) {
@@ -254,7 +258,6 @@ namespace VCX::Labs::Final {
                 HandleSlingshotInput(pos);
             }
         } else {
-            if (ImGui::IsKeyDown(ImGuiKey_S)) return;
             _cameraManager.ProcessInput(_camera, pos);
         }
     }
@@ -263,6 +266,7 @@ namespace VCX::Labs::Final {
         _dragging = false;
         _birdLaunched = false;
         _birdMovingToSlingshot = false;
+        _launchPlaneYaw = 0.f;
         _dragPosition = _scene.Anchor;
         _birdQueue = _scene.Reset(_world, _breakThreshold, static_cast<LevelRegister::LevelID>(_levelIndex));
         _activeBirdSlot = 0;
@@ -435,7 +439,7 @@ namespace VCX::Labs::Final {
 
         // Spring energy conservation: ½k·stretch² = ½m·v²  →  v = stretch·√(k/m)
         float const springSpeed = stretch * std::sqrt(_springConstant / bird.Mass);
-        glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : glm::vec3(1.f, 0.f, 0.f);
+        glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : GetLaunchPlaneForward();
 
         bird.Position = ClampBirdPositionAboveGround(_dragPosition);
         bird.Velocity = launchDir * springSpeed * launchSpeedScale;
@@ -501,6 +505,43 @@ namespace VCX::Labs::Final {
         }
     }
 
+    glm::vec3 CaseAngryBirds3D::GetLaunchPlaneForward() const {
+        return glm::vec3(std::cos(_launchPlaneYaw), 0.f, std::sin(_launchPlaneYaw));
+    }
+
+    glm::vec3 CaseAngryBirds3D::GetLaunchPlaneNormal() const {
+        glm::vec3 const up(0.f, 1.f, 0.f);
+        return glm::normalize(glm::cross(up, GetLaunchPlaneForward()));
+    }
+
+    glm::vec3 CaseAngryBirds3D::ProjectOntoLaunchPlane(glm::vec3 position) const {
+        glm::vec3 const anchor = _scene.Anchor;
+        glm::vec3 const forward = GetLaunchPlaneForward();
+        glm::vec3 const up(0.f, 1.f, 0.f);
+        glm::vec3 const rel = position - anchor;
+        return anchor + forward * glm::dot(rel, forward) + up * glm::dot(rel, up);
+    }
+
+    void CaseAngryBirds3D::UpdateLaunchPlaneRotation(float dt) {
+        constexpr float kRotateSpeed = .2f;
+        float delta = 0.f;
+        if (ImGui::IsKeyDown(ImGuiKey_A)) delta -= kRotateSpeed * dt;
+        if (ImGui::IsKeyDown(ImGuiKey_D)) delta += kRotateSpeed * dt;
+
+        _launchPlaneYaw += delta;
+        if (ImGui::IsKeyDown(ImGuiKey_W)) _launchPlaneYaw = 0.f;
+        _launchPlaneYaw = std::clamp(_launchPlaneYaw, -_launchPlaneYawLimit, _launchPlaneYawLimit);
+        if (_dragging) {
+            _dragPosition = ProjectOntoLaunchPlane(_dragPosition);
+            float const pullLen = glm::length(_dragPosition - _scene.Anchor);
+            if (pullLen > _maxPull) {
+                glm::vec3 const pullDir = glm::normalize(_dragPosition - _scene.Anchor);
+                _dragPosition = _scene.Anchor + pullDir * _maxPull;
+            }
+            _dragPosition = ClampBirdPositionAboveGround(_dragPosition);
+        }
+    }
+
     glm::vec3 CaseAngryBirds3D::ScreenToLaunchPlane(ImVec2 const & mousePos) const {
         auto * window = ImGui::GetCurrentWindow();
         float const width = std::max(window->Rect().GetWidth(), 1.f);
@@ -517,13 +558,12 @@ namespace VCX::Labs::Final {
 
         glm::vec3 const rayOrigin = glm::vec3(nearPoint);
         glm::vec3 const rayDir = glm::normalize(glm::vec3(farPoint - nearPoint));
-        // Plane through Anchor, perpendicular to camera forward — allows 3D aim
-        glm::vec3 const planeNormal = glm::normalize(_camera.Target - _camera.Eye);
+        glm::vec3 const planeNormal = GetLaunchPlaneNormal();
         float const denom = glm::dot(rayDir, planeNormal);
-        if (std::abs(denom) < 1e-5f) return _dragPosition;
+        if (std::abs(denom) < 1e-5f) return ProjectOntoLaunchPlane(_dragPosition);
 
         float const t = glm::dot(_scene.Anchor - rayOrigin, planeNormal) / denom;
-        return rayOrigin + rayDir * t;
+        return ProjectOntoLaunchPlane(rayOrigin + rayDir * t);
     }
 
     void CaseAngryBirds3D::BuildStaticGeometry() {
@@ -650,6 +690,9 @@ namespace VCX::Labs::Final {
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, -.55f), _scene.Anchor + glm::vec3(0.f, -.5f, -.55f), glm::vec3(.38f, .19f, .07f));
         DrawLine(_scene.Anchor + glm::vec3(0.f, .85f, .55f), _scene.Anchor + glm::vec3(0.f, -.5f, .55f), glm::vec3(.38f, .19f, .07f));
         glLineWidth(1.2f);
+        if (_gameStarted && !_birdLaunched && !_birdMovingToSlingshot) {
+            DrawLaunchPlaneGuide();
+        }
         DrawTrajectoryPreview();
 
         glLineWidth(1.f);
@@ -731,6 +774,25 @@ namespace VCX::Labs::Final {
         _lineItem.Draw({ _lineProgram.Use() });
     }
 
+    void CaseAngryBirds3D::DrawLaunchPlaneGuide() {
+        glm::vec3 const anchor = _scene.Anchor;
+        glm::vec3 const forward = GetLaunchPlaneForward();
+        glm::vec3 const up(0.f, 1.f, 0.f);
+        glm::vec3 const guideColor(.35f, .75f, 1.f);
+
+        DrawLine(anchor, anchor + forward * (_maxPull + .4f), guideColor);
+        DrawLine(anchor, anchor + up * (_maxPull + .4f), guideColor);
+
+        int const segments = 24;
+        glm::vec3 prev = anchor + forward * _maxPull;
+        for (int i = 1; i <= segments; ++i) {
+            float const angle = float(i) / float(segments) * std::numbers::pi_v<float> * .5f;
+            glm::vec3 const point = anchor + forward * (std::cos(angle) * _maxPull) + up * (std::sin(angle) * _maxPull);
+            DrawLine(prev, point, glm::vec3(.25f, .55f, .85f));
+            prev = point;
+        }
+    }
+
     void CaseAngryBirds3D::DrawTrajectoryPreview() {
         if (!_dragging) return;
         glm::vec3 pos = _dragPosition;
@@ -752,7 +814,7 @@ namespace VCX::Labs::Final {
         glm::vec3 pull = _scene.Anchor - _dragPosition;
         float const stretch = glm::length(pull);
         float const springSpeed = stretch * std::sqrt(_springConstant / birdMass);
-        glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : glm::vec3(1.f, 0.f, 0.f);
+        glm::vec3 const launchDir = stretch > 1e-4f ? pull / stretch : GetLaunchPlaneForward();
         glm::vec3 vel = launchDir * springSpeed * launchSpeedScale;
         glm::vec3 prev = pos;
         for (int i = 0; i < 32; ++i) {

@@ -15,8 +15,8 @@ namespace VCX::Labs::Final {
         glm::vec3 Gravity      = glm::vec3(0.f, -9.8f, 0.f);
         float     Restitution  = .28f;
         float     Friction     = .78f;
-        float     LinearDamping = .9999f;
-        float     AngularDamping = .9996f;
+        float     LinearDamping = .99999f;
+        float     AngularDamping = .99996f;
         int       FragmentsCreated = 0;
 
         SolverType CurrentSolver = SolverType::ConstraintBasedJacobi;

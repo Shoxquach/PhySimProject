@@ -120,40 +120,20 @@ namespace VCX::Labs::Common {
 
         bool movingByMouse = moving && altKey && leftHeld;
 
-        bool panningByKeyBoard[6] = {
-            ImGui::IsItemFocused() && (ImGui::IsKeyDown(ImGuiKey_W) || ImGui::IsKeyDown(ImGuiKey_UpArrow)),
-            ImGui::IsItemFocused() && (ImGui::IsKeyDown(ImGuiKey_S) || ImGui::IsKeyDown(ImGuiKey_DownArrow)),
-            ImGui::IsItemFocused() && (ImGui::IsKeyDown(ImGuiKey_A) || ImGui::IsKeyDown(ImGuiKey_LeftArrow)),
-            ImGui::IsItemFocused() && (ImGui::IsKeyDown(ImGuiKey_D) || ImGui::IsKeyDown(ImGuiKey_RightArrow)),
-            ImGui::IsItemFocused() && ImGui::IsKeyDown(ImGuiKey_Q),
-            ImGui::IsItemFocused() && ImGui::IsKeyDown(ImGuiKey_E)
-        };
-
-        if (ImGui::IsItemFocused() && ImGui::IsKeyPressed(ImGuiKey_R)) {
-            Reset(camera);
-            return;
-        }
-
         _state = StateNone;
         if (anyHeld) {
             _state |= StateHold;
         }
-        if (movingByMouse || panningByMouse || (EnablePan && (panningByKeyBoard[0] || panningByKeyBoard[1] || panningByKeyBoard[2] || panningByKeyBoard[3] || panningByKeyBoard[4] || panningByKeyBoard[5]))) {
+        if (movingByMouse || panningByMouse) {
             // perspective
             glm::vec3 direction      = camera.Target - camera.Eye;
             float     targetDistance = glm::length(direction);
             glm::quat q              = glm::quatLookAt(direction / targetDistance, camera.Up);
             // half of the fov is center to top of screen
             targetDistance *= glm::tan(glm::radians(camera.Fovy) * 0.5f);
-            float panX = (panningByMouse || movingByMouse) ? -delta.x * heightNorm : 0.f;
-            float panY = (panningByMouse || movingByMouse) ? delta.y * heightNorm : 0.f;
+            float panX = -delta.x * heightNorm;
+            float panY = delta.y * heightNorm;
             float panZ = 0.f;
-            if (panningByKeyBoard[0]) panZ -= 0.02f;
-            if (panningByKeyBoard[1]) panZ += 0.02f;
-            if (panningByKeyBoard[2]) panX -= 0.02f;
-            if (panningByKeyBoard[3]) panX += 0.02f;
-            if (panningByKeyBoard[4]) panY -= 0.02f;
-            if (panningByKeyBoard[5]) panY += 0.02f;
             // we use only clientHeight here so aspect ratio does not distort speed
             float     panLeft  = 2 * panX * PanSpeed * targetDistance;
             float     panUp    = 2 * panY * PanSpeed * targetDistance;

@@ -29,7 +29,7 @@ namespace VCX::Labs::Final {
             return _physics.AddBox(BodyKind::Wood, position, halfSize, Densities::Wood, Materials::Wood, _breakThreshold * toughnessMul);
         }
 
-        int AddGlass(glm::vec3 const & position, glm::vec3 const & halfSize, float toughnessMul = 0.72f) {
+        int AddGlass(glm::vec3 const & position, glm::vec3 const & halfSize, float toughnessMul = .6f) {
             return _physics.AddBox(BodyKind::Glass, position, halfSize, Densities::Glass, Materials::Glass, _breakThreshold * toughnessMul);
         }
 
@@ -37,7 +37,7 @@ namespace VCX::Labs::Final {
             return _physics.AddBox(BodyKind::Stone, position, halfSize, Densities::Stone, Materials::Stone, _breakThreshold * toughnessMul);
         }
 
-        int AddTarget(glm::vec3 const & position, glm::vec3 const & halfSize, float toughnessMul = 0.36f) {
+        int AddTarget(glm::vec3 const & position, glm::vec3 const & halfSize, float toughnessMul = .24f) {
             return _physics.AddBox(BodyKind::Target, position, halfSize, Densities::Target, Materials::Target, _breakThreshold * toughnessMul);
         }
 

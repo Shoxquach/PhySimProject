@@ -50,7 +50,8 @@ namespace VCX::Labs::Final {
         }
 
         for (int iter = 0; iter < iterations; ++iter) {
-            SolveVelocityConstraints(bodies);
+            SolveNormalConstraintsJacobi(bodies);
+            SolveFrictionConstraintsJacobi(bodies);
         }
 
         ApplyImpulses(bodies);
@@ -146,11 +147,11 @@ namespace VCX::Labs::Final {
                 glm::vec3 velB = GetContactVelocity(bodyB, point);
                 float relVelNormal = glm::dot(velB - velA, constraint.Normal);
 
+                float bias = -c_BaumgarteFactor * std::max(constraint.Penetration - c_ContactSlop, 0.f);
                 if (relVelNormal < -c_RestitutionVelocityThreshold) {
-                    constraint.Bias = std::min(restitution, c_MaxJacobiRestitution) * relVelNormal;
-                } else {
-                    constraint.Bias = 0.f;
+                    bias += std::min(restitution, c_MaxJacobiRestitution) * relVelNormal;
                 }
+                constraint.Bias = bias;
 
                 m_Constraints.push_back(constraint);
             }
@@ -158,6 +159,8 @@ namespace VCX::Labs::Final {
     }
 
     void ConstraintSolver::ApplyPositionCorrection(std::vector<RigidBody>& bodies, const std::vector<Contact>& contacts) {
+        m_DeltaPositions.assign(bodies.size(), glm::vec3(0.f));
+
         for (const auto& contact : contacts) {
             RigidBody& bodyA = bodies[contact.A];
             RigidBody groundBody;
@@ -175,14 +178,20 @@ namespace VCX::Labs::Final {
                 c_MaxPositionCorrection);
             glm::vec3 const correction = contact.Normal * correctionMag;
 
-            if (!bodyA.IsStatic) bodyA.Position -= correction * bodyA.InvMass;
-            if (!bodyB.IsStatic) bodyB.Position += correction * bodyB.InvMass;
+            if (!bodyA.IsStatic) m_DeltaPositions[contact.A] -= correction * bodyA.InvMass;
+            if (!bodyB.IsStatic && contact.B >= 0) m_DeltaPositions[contact.B] += correction * bodyB.InvMass;
+        }
+
+        for (size_t i = 0; i < bodies.size(); ++i) {
+            if (!bodies[i].IsStatic) {
+                bodies[i].Position += m_DeltaPositions[i] * c_PositionRelaxation;
+            }
         }
     }
 
-    void ConstraintSolver::SolveVelocityConstraints(const std::vector<RigidBody>& bodies) {
-        std::vector<glm::vec3> deltaVelocities(bodies.size(), glm::vec3(0.f));
-        std::vector<glm::vec3> deltaAngularVelocities(bodies.size(), glm::vec3(0.f));
+    void ConstraintSolver::SolveNormalConstraintsJacobi(const std::vector<RigidBody>& bodies) {
+        m_DeltaVelocities.assign(bodies.size(), glm::vec3(0.f));
+        m_DeltaAngularVelocities.assign(bodies.size(), glm::vec3(0.f));
 
         for (auto& constraint : m_Constraints) {
             const RigidBody& bodyA = bodies[constraint.BodyA];
@@ -190,88 +199,93 @@ namespace VCX::Labs::Final {
             groundBody.IsStatic = true;
             const RigidBody& bodyB = (constraint.BodyB >= 0) ? bodies[constraint.BodyB] : groundBody;
 
-            VelocityState& stateA = m_VelocityStates[constraint.BodyA];
-            VelocityState stateB = (constraint.BodyB >= 0) 
-                ? m_VelocityStates[constraint.BodyB] 
-                : VelocityState{};
+            VelocityState const & stateA = m_VelocityStates[constraint.BodyA];
 
-            glm::vec3 localDeltaVelA(0.f);
-            glm::vec3 localDeltaVelB(0.f);
-            glm::vec3 localDeltaAngularA(0.f);
-            glm::vec3 localDeltaAngularB(0.f);
+            glm::vec3 const velA = stateA.Velocity + glm::cross(stateA.AngularVelocity, constraint.rA);
+            glm::vec3 velB(0.f);
+            if (constraint.BodyB >= 0 && !bodyB.IsStatic) {
+                VelocityState const & stateB = m_VelocityStates[constraint.BodyB];
+                velB = stateB.Velocity + glm::cross(stateB.AngularVelocity, constraint.rB);
+            }
 
-            auto contactVelocityA = [&]() {
-                return stateA.Velocity + localDeltaVelA + glm::cross(stateA.AngularVelocity + localDeltaAngularA, constraint.rA);
-            };
-            auto contactVelocityB = [&]() {
-                return stateB.Velocity + localDeltaVelB + glm::cross(stateB.AngularVelocity + localDeltaAngularB, constraint.rB);
-            };
-            auto applyImpulse = [&](glm::vec3 const& impulse) {
-                if (!bodyA.IsStatic) {
-                    glm::vec3 const dv = -impulse * bodyA.InvMass;
-                    glm::vec3 const dw = -(m_InvInertias[constraint.BodyA] * glm::cross(constraint.rA, impulse));
-                    localDeltaVelA += dv;
-                    localDeltaAngularA += dw;
-                    deltaVelocities[constraint.BodyA] += dv;
-                    deltaAngularVelocities[constraint.BodyA] += dw;
-                }
-                if (!bodyB.IsStatic && constraint.BodyB >= 0) {
-                    glm::vec3 const dv = impulse * bodyB.InvMass;
-                    glm::vec3 const dw = m_InvInertias[constraint.BodyB] * glm::cross(constraint.rB, impulse);
-                    localDeltaVelB += dv;
-                    localDeltaAngularB += dw;
-                    deltaVelocities[constraint.BodyB] += dv;
-                    deltaAngularVelocities[constraint.BodyB] += dw;
-                }
-            };
-
-            glm::vec3 relativeVel = contactVelocityB() - contactVelocityA();
-
-            float vn = glm::dot(relativeVel, constraint.Normal);
+            float const vn = glm::dot(velB - velA, constraint.Normal);
             float lambda = -(vn + constraint.Bias) * constraint.EffectiveMassNormal;
 
-            float oldImpulse = constraint.NormalImpulse;
+            float const oldImpulse = constraint.NormalImpulse;
             constraint.NormalImpulse = std::max(oldImpulse + lambda, 0.f);
-            lambda = constraint.NormalImpulse - oldImpulse;
-            lambda *= c_JacobiRelaxation;
+            lambda = (constraint.NormalImpulse - oldImpulse) * c_JacobiRelaxation;
             constraint.NormalImpulse = oldImpulse + lambda;
 
-            glm::vec3 impulse = lambda * constraint.Normal;
-            applyImpulse(impulse);
-
-            relativeVel = contactVelocityB() - contactVelocityA();
-
-            float vt1 = glm::dot(relativeVel, constraint.Tangent1);
-            float lambdaT1 = -vt1 * constraint.EffectiveMassTangent1;
-
-            float maxFriction = constraint.Friction * constraint.NormalImpulse;
-            float oldTangentImpulse1 = constraint.TangentImpulse1;
-            constraint.TangentImpulse1 = glm::clamp(oldTangentImpulse1 + lambdaT1, -maxFriction, maxFriction);
-            lambdaT1 = constraint.TangentImpulse1 - oldTangentImpulse1;
-            lambdaT1 *= c_JacobiRelaxation;
-            constraint.TangentImpulse1 = oldTangentImpulse1 + lambdaT1;
-
-            glm::vec3 tangentImpulse1 = lambdaT1 * constraint.Tangent1;
-            applyImpulse(tangentImpulse1);
-
-            relativeVel = contactVelocityB() - contactVelocityA();
-
-            float vt2 = glm::dot(relativeVel, constraint.Tangent2);
-            float lambdaT2 = -vt2 * constraint.EffectiveMassTangent2;
-
-            float oldTangentImpulse2 = constraint.TangentImpulse2;
-            constraint.TangentImpulse2 = glm::clamp(oldTangentImpulse2 + lambdaT2, -maxFriction, maxFriction);
-            lambdaT2 = constraint.TangentImpulse2 - oldTangentImpulse2;
-            lambdaT2 *= c_JacobiRelaxation;
-            constraint.TangentImpulse2 = oldTangentImpulse2 + lambdaT2;
-
-            glm::vec3 tangentImpulse2 = lambdaT2 * constraint.Tangent2;
-            applyImpulse(tangentImpulse2);
+            glm::vec3 const impulse = lambda * constraint.Normal;
+            if (!bodyA.IsStatic) {
+                m_DeltaVelocities[constraint.BodyA] -= impulse * bodyA.InvMass;
+                m_DeltaAngularVelocities[constraint.BodyA] -= m_InvInertias[constraint.BodyA] * glm::cross(constraint.rA, impulse);
+            }
+            if (!bodyB.IsStatic && constraint.BodyB >= 0) {
+                m_DeltaVelocities[constraint.BodyB] += impulse * bodyB.InvMass;
+                m_DeltaAngularVelocities[constraint.BodyB] += m_InvInertias[constraint.BodyB] * glm::cross(constraint.rB, impulse);
+            }
         }
 
         for (size_t i = 0; i < m_VelocityStates.size(); ++i) {
-            m_VelocityStates[i].Velocity += deltaVelocities[i];
-            m_VelocityStates[i].AngularVelocity += deltaAngularVelocities[i];
+            m_VelocityStates[i].Velocity += m_DeltaVelocities[i];
+            m_VelocityStates[i].AngularVelocity += m_DeltaAngularVelocities[i];
+        }
+    }
+
+    void ConstraintSolver::SolveFrictionConstraintsJacobi(const std::vector<RigidBody>& bodies) {
+        m_DeltaVelocities.assign(bodies.size(), glm::vec3(0.f));
+        m_DeltaAngularVelocities.assign(bodies.size(), glm::vec3(0.f));
+
+        for (auto& constraint : m_Constraints) {
+            const RigidBody& bodyA = bodies[constraint.BodyA];
+            RigidBody groundBody;
+            groundBody.IsStatic = true;
+            const RigidBody& bodyB = (constraint.BodyB >= 0) ? bodies[constraint.BodyB] : groundBody;
+
+            VelocityState const & stateA = m_VelocityStates[constraint.BodyA];
+
+            glm::vec3 const velA = stateA.Velocity + glm::cross(stateA.AngularVelocity, constraint.rA);
+            glm::vec3 velB(0.f);
+            if (constraint.BodyB >= 0 && !bodyB.IsStatic) {
+                VelocityState const & stateB = m_VelocityStates[constraint.BodyB];
+                velB = stateB.Velocity + glm::cross(stateB.AngularVelocity, constraint.rB);
+            }
+            glm::vec3 const relativeVel = velB - velA;
+
+            float const maxFriction = constraint.Friction * constraint.NormalImpulse;
+
+            float const vt1 = glm::dot(relativeVel, constraint.Tangent1);
+            float lambdaT1 = -vt1 * constraint.EffectiveMassTangent1;
+            float const oldTangentImpulse1 = constraint.TangentImpulse1;
+            constraint.TangentImpulse1 = glm::clamp(oldTangentImpulse1 + lambdaT1, -maxFriction, maxFriction);
+            lambdaT1 = (constraint.TangentImpulse1 - oldTangentImpulse1) * c_JacobiRelaxation;
+            constraint.TangentImpulse1 = oldTangentImpulse1 + lambdaT1;
+
+            glm::vec3 impulse = lambdaT1 * constraint.Tangent1;
+
+            float const vt2 = glm::dot(relativeVel, constraint.Tangent2);
+            float lambdaT2 = -vt2 * constraint.EffectiveMassTangent2;
+            float const oldTangentImpulse2 = constraint.TangentImpulse2;
+            constraint.TangentImpulse2 = glm::clamp(oldTangentImpulse2 + lambdaT2, -maxFriction, maxFriction);
+            lambdaT2 = (constraint.TangentImpulse2 - oldTangentImpulse2) * c_JacobiRelaxation;
+            constraint.TangentImpulse2 = oldTangentImpulse2 + lambdaT2;
+
+            impulse += lambdaT2 * constraint.Tangent2;
+
+            if (!bodyA.IsStatic) {
+                m_DeltaVelocities[constraint.BodyA] -= impulse * bodyA.InvMass;
+                m_DeltaAngularVelocities[constraint.BodyA] -= m_InvInertias[constraint.BodyA] * glm::cross(constraint.rA, impulse);
+            }
+            if (!bodyB.IsStatic && constraint.BodyB >= 0) {
+                m_DeltaVelocities[constraint.BodyB] += impulse * bodyB.InvMass;
+                m_DeltaAngularVelocities[constraint.BodyB] += m_InvInertias[constraint.BodyB] * glm::cross(constraint.rB, impulse);
+            }
+        }
+
+        for (size_t i = 0; i < m_VelocityStates.size(); ++i) {
+            m_VelocityStates[i].Velocity += m_DeltaVelocities[i];
+            m_VelocityStates[i].AngularVelocity += m_DeltaAngularVelocities[i];
         }
     }
 
@@ -316,37 +330,59 @@ namespace VCX::Labs::Final {
         float friction,
         std::vector<Contact>& impactContacts
     ) {
-        std::vector<Contact> contacts;
         impactContacts.clear();
-        ContactDetection::CollectContacts(bodies, contacts);
+        std::vector<Contact> contacts;
 
-        for (auto & c : contacts) {
-            auto & a = bodies[c.A];
-            RigidBody groundBody;
-            groundBody.IsStatic = true;
-            groundBody.InvMass = 0.f;
-            RigidBody & b = c.B >= 0 ? bodies[c.B] : groundBody;
+        for (int outer = 0; outer < c_OuterIterations; ++outer) {
+            ContactDetection::CollectContacts(bodies, contacts);
+            if (contacts.empty()) break;
 
-            StopBoomerangOnImpact(a);
-            if (c.B >= 0) {
-                StopBoomerangOnImpact(b);
+            for (auto & c : contacts) {
+                auto & a = bodies[c.A];
+                RigidBody groundBody;
+                groundBody.IsStatic = true;
+                groundBody.InvMass = 0.f;
+                RigidBody & b = c.B >= 0 ? bodies[c.B] : groundBody;
+
+                StopBoomerangOnImpact(a);
+                if (c.B >= 0) {
+                    StopBoomerangOnImpact(b);
+                }
+
+                if (a.IsStatic && b.IsStatic) continue;
+
+                const auto& points = c.Points.empty() ? std::vector<glm::vec3>{ c.Point } : c.Points;
+                for (auto const & point : points) {
+                    glm::vec3 const relVel = GetContactVelocity(b, point) - GetContactVelocity(a, point);
+                    float const normalVel = glm::dot(relVel, c.Normal);
+                    c.Impact = std::max(c.Impact, std::max(-normalVel, 0.f));
+                }
+
+                if (outer == 0 && c.Impact > 0.f) {
+                    impactContacts.push_back(c);
+                }
             }
 
-            if (a.IsStatic && b.IsStatic) continue;
-
-            const auto& points = c.Points.empty() ? std::vector<glm::vec3>{ c.Point } : c.Points;
-            for (auto const & point : points) {
-                glm::vec3 const relVel = GetContactVelocity(b, point) - GetContactVelocity(a, point);
-                float const normalVel = glm::dot(relVel, c.Normal);
-                c.Impact = std::max(c.Impact, std::max(-normalVel, 0.f));
+            if (m_PositionCorrectionEnabled) {
+                ApplyPositionCorrection(bodies, contacts);
             }
 
-            if (c.Impact > 0.f) {
-                impactContacts.push_back(c);
+            PrepareConstraints(bodies, contacts, restitution, friction);
+            if (m_Constraints.empty()) continue;
+
+            m_VelocityStates.resize(bodies.size());
+            for (size_t i = 0; i < bodies.size(); ++i) {
+                m_VelocityStates[i].Velocity = bodies[i].Velocity;
+                m_VelocityStates[i].AngularVelocity = bodies[i].AngularVel;
             }
+
+            for (int v = 0; v < c_VelocityIterations; ++v) {
+                SolveNormalConstraintsJacobi(bodies);
+                SolveFrictionConstraintsJacobi(bodies);
+            }
+
+            ApplyImpulses(bodies);
         }
-
-        SolveConstraints(bodies, contacts, restitution, friction, 12);
     }
 
 }

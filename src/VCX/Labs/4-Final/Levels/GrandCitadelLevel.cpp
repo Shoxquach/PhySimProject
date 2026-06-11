@@ -5,75 +5,47 @@ namespace VCX::Labs::Final {
     void GrandCitadelLevel::Setup(World & world, float breakThreshold) const {
         LevelBuilder b(world.Rigid, breakThreshold);
 
-        // Box center positions; bottom = y - halfSize.y. Ground at y = 0.
-        // Each stacked block: centerY = supportTop + halfSize.y.
+        b.AddStone(glm::vec3(.8f, .75f, .0f), glm::vec3(.8f, .75f, .5f));
+        b.AddWood(glm::vec3(.2f, 2.1f, .0f), glm::vec3(.1f, .6f, .6f));
+        b.AddWood(glm::vec3(1.4f, 2.1f, .0f), glm::vec3(.1f, .6f, .6f));
+        b.AddWood(glm::vec3(.8f, 2.95f, .0f), glm::vec3(.8f, .25f, .6f));
+        b.AddStone(glm::vec3(.6f, 1.7f, .0f), glm::vec3(.2f, .2f, .2f));
+        b.AddTarget(glm::vec3(1.f, 1.7f, .0f), glm::vec3(.2f, .2f, .2f));
+        b.AddGlass(glm::vec3(.8f, 3.3f, .0f), glm::vec3(.5f, .1f, .4f));
+        b.AddGlass(glm::vec3(.45f, 3.5f, .0f), glm::vec3(.1f, .1f, .1f));
+        b.AddGlass(glm::vec3(.8f, 3.5f, .0f), glm::vec3(.1f, .1f, .1f));
+        b.AddGlass(glm::vec3(1.15f, 3.5f, .0f), glm::vec3(.1f, .1f, .1f));
 
-        // ── Ground foundation (7) ─────────────────────────────────────────────
-        b.AddStone(glm::vec3(3.5f, .28f, 0.f), glm::vec3(.88f, .28f, .92f));
-        b.AddWood(glm::vec3(1.25f, .18f, -.78f), glm::vec3(.44f, .18f, .36f));
-        b.AddWood(glm::vec3(1.25f, .18f, .78f), glm::vec3(.44f, .18f, .36f));
-        b.AddStone(glm::vec3(2.15f, .24f, 0.f), glm::vec3(.38f, .24f, .44f));
-        b.AddWood(glm::vec3(5.75f, .18f, -.78f), glm::vec3(.44f, .18f, .36f));
-        b.AddWood(glm::vec3(5.75f, .18f, .78f), glm::vec3(.44f, .18f, .36f));
-        b.AddStone(glm::vec3(4.85f, .24f, 0.f), glm::vec3(.38f, .24f, .44f));
+        b.AddStone(glm::vec3(2.5f, .25f, 0.f), glm::vec3(.85f, .25f, .96f));
+        b.AddStone(glm::vec3(5.2f, .25f, 0.f), glm::vec3(.85f, .25f, .96f));
+        b.AddGlass(glm::vec3(3.1f, 1.85f, 0.f), glm::vec3(.25f, 1.35f, .25f));
+        b.AddGlass(glm::vec3(4.6f, 1.85f, 0.f), glm::vec3(.25f, 1.35f, .25f));
+        b.AddWood(glm::vec3(3.85f, .15f, 0.f), glm::vec3(.3f, .15f, .3f));
+        b.AddTarget(glm::vec3(3.85f, .5f, 0.f), glm::vec3(.2f, .2f, .2f));
+        b.AddWood(glm::vec3(3.85f, 3.5f, 0.f), glm::vec3(1.24f, .3f, .7f));
+        b.AddTarget(glm::vec3(2.95f, 4.f, .5f), glm::vec3(.2f, .2f, .2f));
+        b.AddGlass(glm::vec3(3.85f, 4.f, .5f), glm::vec3(.2f, .2f, .2f));
+        b.AddTarget(glm::vec3(4.75f, 4.f, .5f), glm::vec3(.2f, .2f, .2f));
+        b.AddTarget(glm::vec3(2.95f, 4.f, -.5f), glm::vec3(.2f, .2f, .2f));
+        b.AddGlass(glm::vec3(3.85f, 4.f, -.5f), glm::vec3(.2f, .2f, .2f));
+        b.AddTarget(glm::vec3(4.75f, 4.f, -.5f), glm::vec3(.2f, .2f, .2f));
+        b.AddGlass(glm::vec3(3.85f, .8f, 0.f), glm::vec3(.26f, .1f, .3f));
+        b.AddWood(glm::vec3(3.85f, .6f, .78f), glm::vec3(1.16f, .1f, .18f));
+        b.AddWood(glm::vec3(3.85f, .6f, -.78f), glm::vec3(1.16f, .1f, .18f));
+        
+        b.AddStone(glm::vec3(6.5f, .6f, 0.f), glm::vec3(.15f, .6f, .7f));
+        b.AddStone(glm::vec3(8.1f, .6f, 0.f), glm::vec3(.15f, .6f, .7f));
+        b.AddTarget(glm::vec3(7.3f, .2f, 0.f), glm::vec3(.2f, .2f, .2f));
+        b.AddWood(glm::vec3(7.3f, 1.3f, 0.f), glm::vec3(1.15f, .1f, .7f));
 
-        // ── Outer curtain walls on ground (4) ───────────────────────────────
-        b.AddStone(glm::vec3(2.15f, .24f, -1.38f), glm::vec3(.58f, .24f, .2f));
-        b.AddStone(glm::vec3(4.85f, .24f, 1.38f), glm::vec3(.58f, .24f, .2f));
-        b.AddWood(glm::vec3(3.5f, .16f, -1.38f), glm::vec3(.82f, .16f, .2f));
-        b.AddWood(glm::vec3(3.5f, .16f, 1.38f), glm::vec3(.82f, .16f, .2f));
+        b.AddStone(glm::vec3(6.7f, 2.f, 0.f), glm::vec3(.15f, .6f, .55f));
+        b.AddStone(glm::vec3(7.9f, 2.f, 0.f), glm::vec3(.15f, .6f, .55f));
+        b.AddTarget(glm::vec3(7.3f, 1.6f, 0.f), glm::vec3(.2f, .2f, .2f));
+        b.AddWood(glm::vec3(7.3f, 2.7f, 0.f), glm::vec3(.95f, .1f, .55f));
 
-        // ── Left bastion columns (6), wing top = 0.36 ───────────────────────
-        float const leftX = 1.25f;
-        b.AddStone(glm::vec3(leftX, .72f, -.78f), glm::vec3(.36f, .36f, .32f));
-        b.AddStone(glm::vec3(leftX, 1.44f, -.78f), glm::vec3(.32f, .36f, .28f));
-        b.AddWood(glm::vec3(leftX, 1.9f, -.78f), glm::vec3(.38f, .1f, .34f));
-        b.AddStone(glm::vec3(leftX, 2.2f, -.78f), glm::vec3(.3f, .3f, .28f));
-        b.AddStone(glm::vec3(leftX, .72f, .78f), glm::vec3(.36f, .36f, .32f));
-        b.AddGlass(glm::vec3(leftX, 1.44f, .78f), glm::vec3(.28f, .32f, .26f));
-
-        // ── Right bastion columns (6) ─────────────────────────────────────────
-        float const rightX = 5.75f;
-        b.AddStone(glm::vec3(rightX, .72f, -.78f), glm::vec3(.36f, .36f, .32f));
-        b.AddStone(glm::vec3(rightX, 1.44f, -.78f), glm::vec3(.32f, .36f, .28f));
-        b.AddWood(glm::vec3(rightX, 1.9f, -.78f), glm::vec3(.38f, .1f, .34f));
-        b.AddStone(glm::vec3(rightX, 2.2f, -.78f), glm::vec3(.3f, .3f, .28f));
-        b.AddStone(glm::vec3(rightX, .72f, .78f), glm::vec3(.36f, .36f, .32f));
-        b.AddGlass(glm::vec3(rightX, 1.44f, .78f), glm::vec3(.28f, .32f, .26f));
-
-        // ── Cross bridges on bastion L2 tops (y = 1.8) ────────────────────────
-        b.AddWood(glm::vec3(2.1f, 1.88f, -.78f), glm::vec3(.52f, .08f, .2f));
-        b.AddWood(glm::vec3(2.1f, 1.88f, .78f), glm::vec3(.52f, .08f, .2f));
-        b.AddWood(glm::vec3(4.9f, 1.88f, -.78f), glm::vec3(.52f, .08f, .2f));
-        b.AddWood(glm::vec3(4.9f, 1.88f, .78f), glm::vec3(.52f, .08f, .2f));
-
-        // ── Central keep on base top 0.56 (6) ─────────────────────────────────
-        b.AddStone(glm::vec3(3.5f, .96f, 0.f), glm::vec3(.72f, .4f, .78f));
-        b.AddStone(glm::vec3(3.5f, 1.76f, 0.f), glm::vec3(.66f, .4f, .72f));
-        b.AddGlass(glm::vec3(3.5f, 2.38f, 0.f), glm::vec3(.88f, .22f, .74f));
-        b.AddStone(glm::vec3(3.5f, 2.92f, 0.f), glm::vec3(.58f, .32f, .62f));
-        b.AddWood(glm::vec3(3.5f, 3.36f, 0.f), glm::vec3(.62f, .12f, .58f));
-        b.AddStone(glm::vec3(3.5f, 3.74f, 0.f), glm::vec3(.48f, .26f, .48f));
-
-        // ── Inner buttresses on plinth tops 0.48 (4) ──────────────────────────
-        b.AddWood(glm::vec3(2.15f, .84f, 0.f), glm::vec3(.34f, .36f, .4f));
-        b.AddStone(glm::vec3(2.15f, 1.44f, 0.f), glm::vec3(.3f, .24f, .36f));
-        b.AddWood(glm::vec3(4.85f, .84f, 0.f), glm::vec3(.34f, .36f, .4f));
-        b.AddStone(glm::vec3(4.85f, 1.44f, 0.f), glm::vec3(.3f, .24f, .36f));
-
-        // ── Side spurs on base top 0.56, clear of keep footprint (3) ──────────
-        b.AddWood(glm::vec3(2.55f, .7f, -.62f), glm::vec3(.14f, .14f, .18f));
-        b.AddWood(glm::vec3(4.45f, .7f, .62f), glm::vec3(.14f, .14f, .18f));
-        b.AddStone(glm::vec3(3.5f, .16f, -1.05f), glm::vec3(.38f, .16f, .22f));
-
-        // 40 structural blocks total
-
-        // ── Targets (6), each bottom flush on support top ─────────────────────
-        b.AddTarget(glm::vec3(3.5f, .54f, -1.05f), glm::vec3(.22f, .22f, .22f));     // on front spur top 0.32
-        b.AddTarget(glm::vec3(1.25f, 2.7f, -.78f), glm::vec3(.2f, .2f, .2f));        // on left cap top 2.5
-        b.AddTarget(glm::vec3(5.75f, 2.7f, .78f), glm::vec3(.2f, .2f, .2f));         // on right cap top 2.5
-        b.AddTarget(glm::vec3(3.5f, 4.2f, 0.f), glm::vec3(.2f, .2f, .2f));           // on spire top 4.0
-        b.AddTarget(glm::vec3(2.15f, 1.88f, 0.f), glm::vec3(.2f, .2f, .2f));         // on left buttress top 1.68
-        b.AddTarget(glm::vec3(4.85f, 1.88f, 0.f), glm::vec3(.2f, .2f, .2f));         // on right buttress top 1.68
+        b.AddStone(glm::vec3(6.9f, 3.4f, 0.f), glm::vec3(.15f, .6f, .3f));
+        b.AddStone(glm::vec3(7.7f, 3.4f, 0.f), glm::vec3(.15f, .6f, .3f));
+        b.AddTarget(glm::vec3(7.3f, 3.f, 0.f), glm::vec3(.2f, .2f, .2f));
+        b.AddWood(glm::vec3(7.3f, 4.1f, 0.f), glm::vec3(.75f, .1f, .3f));
     }
 }

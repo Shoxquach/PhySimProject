@@ -5,10 +5,10 @@ namespace VCX::Labs::Final {
     void DominoRunLevel::Setup(World & world, float breakThreshold) const {
         LevelBuilder builder(world.Rigid, breakThreshold);
 
-        builder.AddStone(glm::vec3(-.46f, 1.f, 0.f), glm::vec3(1.f, 1.f, 1.f));
-        builder.AddStone(glm::vec3(0.f, 2.2f, 0.f), glm::vec3(1.76f, .2f, 1.f));
-        builder.AddStone(glm::vec3(-.46f, 2.8f, 0.f), glm::vec3(1.f, .4f, 1.f));
-        builder.AddTarget(glm::vec3(1.1f, .28f, 0.f), glm::vec3(.28f, .28f, .28f));
+        builder.AddStone(glm::vec3(-.4f, 1.f, 0.f), glm::vec3(.9f, 1.f, 1.f));
+        builder.AddStone(glm::vec3(.15f, 2.2f, 0.f), glm::vec3(1.635f, .2f, 1.f));
+        builder.AddStone(glm::vec3(-.4f, 2.8f, 0.f), glm::vec3(.9f, .4f, 1.f));
+        builder.AddTarget(glm::vec3(.76f, .28f, 0.f), glm::vec3(.28f, .28f, .28f));
 
         constexpr int   dominoCount = 9;
         constexpr float startX       = 2.65f;

@@ -85,7 +85,7 @@ namespace VCX::Labs::Final {
 
         float _timeSinceBirdLaunch = 0.f;
         float _birdMoveTime        = 0.f;
-        float _springConstant    = 38.f;    // spring stiffness constant k (N/m)
+        float _springConstant    = 45.f;    // spring stiffness constant k (N/m)
         float _springDamping     = 3.5f;    // snap-back damping (lower = longer visible oscillation)
         float _springOscillationFreq = 4.5f;// snap-back oscillation frequency (Hz)
 
@@ -102,8 +102,10 @@ namespace VCX::Labs::Final {
         float _autoAdvanceDelay   = 2.5f;   // seconds before auto-advancing
 
         float _maxPull           = 2.2f;   // per-level max pull distance
+        float _launchPlaneYaw    = 0.f;    // launch plane rotation around Y (radians)
+        float _launchPlaneYawLimit = 3.14f * 10.f / 180.f;
 
-        float _breakThreshold    = 7.f;
+        float _breakThreshold    = 10.f;
         int   _substeps          = 6;
         glm::vec3 _dragPosition  = glm::vec3(-5.5f, 1.65f, 0.f);
         glm::vec3 _birdMoveStart = glm::vec3(0.f);
@@ -130,10 +132,15 @@ namespace VCX::Labs::Final {
         void DrawSphere(RigidBody const & body);
         void DrawLine(glm::vec3 const & a, glm::vec3 const & b, glm::vec3 const & color);
         void DrawTrajectoryPreview();
+        void DrawLaunchPlaneGuide();
         void DrawSlingshot(glm::vec3 const & leftFork, glm::vec3 const & rightFork, glm::vec3 const & birdPos, float stretchRatio, glm::vec3 const & baseColor);
         void DrawFluid();
 
+        glm::vec3 GetLaunchPlaneForward() const;
+        glm::vec3 GetLaunchPlaneNormal() const;
+        glm::vec3 ProjectOntoLaunchPlane(glm::vec3 position) const;
+        void      UpdateLaunchPlaneRotation(float dt);
         glm::vec3 ScreenToLaunchPlane(ImVec2 const & mousePos) const;
     };
 }
-
+
