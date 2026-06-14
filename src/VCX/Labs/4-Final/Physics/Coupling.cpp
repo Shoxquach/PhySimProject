@@ -42,11 +42,49 @@ namespace VCX::Labs::Final {
             return e;
         }
 
-        bool SurfaceIfInside(RigidBody const & b, glm::vec3 const & worldP, glm::vec3 & surfaceOut, glm::vec3 & normalOut) {
+        float MaxComponent(glm::vec3 const & v) {
+            return std::max(v.x, std::max(v.y, v.z));
+        }
+
+        glm::vec3 FluidCellSizeWorld(FluidWorld const & fluid) {
+            return fluid.Size / glm::vec3(
+                float(std::max(fluid.GridX() - 1, 1)),
+                float(std::max(fluid.GridY() - 1, 1)),
+                float(std::max(fluid.GridZ() - 1, 1)));
+        }
+
+        float SolidMaskPadding(FluidWorld const & fluid) {
+            return 0.55f * MaxComponent(FluidCellSizeWorld(fluid));
+        }
+
+        float ParticleCollisionPadding(FluidWorld const & fluid) {
+            return std::max(0.015f, 1.15f * fluid.Solver.m_particleRadius * MaxComponent(fluid.Size));
+        }
+
+        float BodyHalfHeight(RigidBody const & b) {
+            return IsSphere(b) ? b.Radius * b.Scale : b.HalfSize.y * b.Scale;
+        }
+
+        void ApplyTankTopLimit(FluidWorld const & fluid, RigidBody & b, float dt) {
+            if (!IsCouplingBody(b) || !fluid.InsideTankXZ(b.Position)) return;
+            if (b.Kind == BodyKind::Bird) return;
+
+            float const clearance = 0.04f + MaxComponent(FluidCellSizeWorld(fluid)) * 0.25f;
+            float const maxCenterY = fluid.BoxMax().y - BodyHalfHeight(b) - clearance;
+            if (b.Position.y <= maxCenterY) return;
+
+            float const penetration = b.Position.y - maxCenterY;
+            b.Position.y -= penetration * std::clamp(12.f * dt, 0.f, 0.65f);
+            b.Velocity.y -= 24.f * penetration * dt;
+            if (b.Velocity.y > 0.f) b.Velocity.y *= 0.15f;
+            b.AngularVel *= std::max(0.f, 1.f - 3.f * dt);
+        }
+
+        bool SurfaceIfInside(RigidBody const & b, glm::vec3 const & worldP, glm::vec3 & surfaceOut, glm::vec3 & normalOut, float padding = 0.f) {
             if (IsSphere(b)) {
                 glm::vec3 d = worldP - b.Position;
                 float dist = glm::length(d);
-                float const radius = b.Radius * b.Scale;
+                float const radius = b.Radius * b.Scale + padding;
                 if (dist >= radius) return false;
                 glm::vec3 n = dist > 1e-6f ? d / dist : glm::vec3(0.f, 1.f, 0.f);
                 surfaceOut = b.Position + n * radius;
@@ -55,7 +93,7 @@ namespace VCX::Labs::Final {
             }
             glm::quat const invq = glm::inverse(b.Rotation);
             glm::vec3 pl = invq * (worldP - b.Position);
-            glm::vec3 hs = b.HalfSize * b.Scale;
+            glm::vec3 hs = b.HalfSize * b.Scale + glm::vec3(padding);
             if (std::abs(pl.x) >= hs.x || std::abs(pl.y) >= hs.y || std::abs(pl.z) >= hs.z)
                 return false;
 
@@ -83,6 +121,7 @@ namespace VCX::Labs::Final {
         for (int i = 0; i < int(rigid.Bodies.size()); ++i) {
             if (i == skipIndex) continue;
             RigidBody & b = rigid.Bodies[i];
+            ApplyTankTopLimit(fluid, b, dt);
             if (!IsCouplingBody(b)) continue;
 
             float const vol         = BodyVolume(b);
@@ -98,19 +137,31 @@ namespace VCX::Labs::Final {
                                                  : b.Position.y - b.HalfSize.y * b.Scale;
             if (bodyBottom >= surfaceY) continue;
 
-            // ---- Analytical equilibrium buoyancy (spring-damper) ----
             float const bodyHeight  = IsSphere(b) ? 2.f * b.Radius * b.Scale
                                                   : 2.f * b.HalfSize.y * b.Scale;
             float const fracEq      = bodyDensity / fluid.Density; // submerged fraction at rest
-            float const targetY     = surfaceY - bodyHeight * (fracEq - 0.5f);
+            float const halfHeight  = bodyHeight * 0.5f;
+            float const topClearance = 0.04f + MaxComponent(FluidCellSizeWorld(fluid)) * 0.25f;
+            float const maxCenterY  = fluid.BoxMax().y - halfHeight - topClearance;
+            float const bodyTop     = b.Position.y + halfHeight;
+            float const submergedHeight = std::clamp(surfaceY - bodyBottom, 0.f, bodyHeight);
+            float const submergedFrac = submergedHeight / std::max(bodyHeight, 1e-4f);
+            float const equilibriumError = submergedFrac - fracEq;
 
-            // Critically-damped harmonic oscillator: d = 2·√(k·m)
-            float const springK     = 80.f;
-            float const dampingC    = 2.f * std::sqrt(springK * b.Mass);
-            float const displacement = targetY - b.Position.y;
-            float const springForce  = springK * displacement;
-            float const dampingForce = dampingC * b.Velocity.y;
-            b.Velocity.y += (springForce - dampingForce) * b.InvMass * dt;
+            // Archimedes-style lift; gravity itself is still applied by the rigid solver later.
+            float const buoyantAccelY = -rigid.Gravity.y * (submergedFrac / std::max(fracEq, 0.08f));
+            b.Velocity.y += buoyantAccelY * dt;
+
+            glm::vec3 const flowVel = fluid.FlowVelocityWorld(b.Position);
+            float const waterDrag = std::clamp((1.2f + 2.2f * submergedFrac) * dt, 0.f, 0.28f);
+            b.Velocity.x -= (b.Velocity.x - flowVel.x) * waterDrag;
+            b.Velocity.z -= (b.Velocity.z - flowVel.z) * waterDrag;
+
+            float const verticalDamping = std::clamp((8.0f + 8.0f * submergedFrac) * dt, 0.f, 0.72f);
+            b.Velocity.y *= (1.f - verticalDamping);
+            if (std::abs(equilibriumError) < 0.08f && std::abs(b.Velocity.y) < 0.20f) {
+                b.Velocity.y = 0.f;
+            }
 
             // Lateral drag in water (keep object from drifting horizontally)
             float const lateralDrag = std::clamp(4.f * fracEq * dt, 0.f, 0.55f);
@@ -129,6 +180,11 @@ namespace VCX::Labs::Final {
                 b.Velocity.z += edgeK * (fluid.BoxMin().z + marginZ - b.Position.z) * dt;
             if (b.Position.z > fluid.BoxMax().z - marginZ)
                 b.Velocity.z -= edgeK * (b.Position.z - fluid.BoxMax().z + marginZ) * dt;
+            if (bodyTop > fluid.BoxMax().y - topClearance || b.Position.y > maxCenterY) {
+                float const topPush = 18.f * (b.Position.y - maxCenterY);
+                b.Velocity.y -= topPush * dt;
+                if (b.Velocity.y > 0.f) b.Velocity.y *= 0.25f;
+            }
 
             // Angular drag
             float const angDrag = std::clamp(5.f * fracEq * dt, 0.f, 0.9f);
@@ -144,14 +200,10 @@ namespace VCX::Labs::Final {
 
         for (RigidBody const & b : rigid.Bodies) {
             if (!b.IsAlive || b.Kind == BodyKind::Fragment) continue;
+            if (b.Kind == BodyKind::Bird) continue;
 
-            // Skip floating bodies (density < fluid): they don't block water,
-            // preventing pressure artifacts that push them out of the tank.
-            float const vol         = BodyVolume(b);
-            float const bodyDensity = vol > 1e-6f ? b.Mass / vol : 1.f;
-            if (bodyDensity < fluid.Density * 0.98f) continue;
-
-            glm::vec3 const ext = WorldExtent(b);
+            float const padding = SolidMaskPadding(fluid);
+            glm::vec3 const ext = WorldExtent(b) + glm::vec3(padding);
             glm::vec3 const aMin = b.Position - ext;
             glm::vec3 const aMax = b.Position + ext;
             if (aMax.x < boxMin.x || aMin.x > boxMax.x ||
@@ -175,7 +227,7 @@ namespace VCX::Labs::Final {
                     for (int k = k0; k <= k1; ++k) {
                         glm::vec3 const cc = fluid.CellCenterWorld(i, j, k);
                         glm::vec3 surf, nrm;
-                        if (SurfaceIfInside(b, cc, surf, nrm)) {
+                        if (SurfaceIfInside(b, cc, surf, nrm, padding)) {
                             fluid.MarkSolidCell(i, j, k, BodyVelAt(b, cc));
                         }
                     }
@@ -183,29 +235,53 @@ namespace VCX::Labs::Final {
     }
 
     void Coupling::PushParticlesOutOfRigid(AngryBirdsPhysics const & rigid, FluidWorld & fluid) {
-        int const n = fluid.ParticleCount();
-        for (int p = 0; p < n; ++p) {
-            glm::vec3 world = fluid.ParticleWorld(p);
-            bool moved = false;
-            glm::vec3 worldVel = fluid.Solver.m_particleVel[p] * fluid.Size;
+        float const padding = ParticleCollisionPadding(fluid);
+        float const topOutflowY = fluid.BoxMax().y - padding * 1.8f;
 
-            for (RigidBody const & b : rigid.Bodies) {
-                if (!b.IsAlive || b.Kind == BodyKind::Fragment) continue;
-                glm::vec3 surf, n3;
-                if (!SurfaceIfInside(b, world, surf, n3)) continue;
+        for (int iter = 0; iter < 1; ++iter) {
+            bool anyMoved = false;
+            for (int p = 0; p < fluid.ParticleCount();) {
+                glm::vec3 world = fluid.ParticleWorld(p);
+                bool moved = false;
+                bool remove = false;
+                glm::vec3 worldVel = fluid.Solver.m_particleVel[p] * fluid.Size;
 
-                world = surf + n3 * 1e-3f;
-                glm::vec3 bodyVel = BodyVelAt(b, surf);
-                float vn = glm::dot(worldVel, n3);
-                float bn = glm::dot(bodyVel, n3);
-                worldVel += (std::max(bn, vn) - vn) * n3;
-                moved = true;
+                for (RigidBody const & b : rigid.Bodies) {
+                    if (!b.IsAlive || b.Kind == BodyKind::Fragment) continue;
+                    if (b.Kind == BodyKind::Bird) continue;
+                    glm::vec3 surf, n3;
+                    if (!SurfaceIfInside(b, world, surf, n3, padding)) continue;
+
+                    world = surf + n3 * (1e-3f + padding * 0.02f);
+                    if (world.y >= topOutflowY || (n3.y > 0.55f && surf.y + padding * 2.f >= topOutflowY)) {
+                        remove = true;
+                        moved = true;
+                        break;
+                    }
+
+                    glm::vec3 const bodyVel = BodyVelAt(b, surf);
+                    glm::vec3 relVel = worldVel - bodyVel;
+                    float const normalVel = glm::dot(relVel, n3);
+                    if (normalVel < 0.f) {
+                        relVel -= normalVel * n3;
+                    }
+                    worldVel = bodyVel + relVel * 0.45f;
+                    moved = true;
+                }
+
+                if (remove) {
+                    fluid.Solver.removeParticle(std::size_t(p));
+                    anyMoved = true;
+                    continue;
+                } else if (moved) {
+                    fluid.Solver.m_particlePos[p] = glm::clamp(fluid.WorldToLocal(world), glm::vec3(-0.49f), glm::vec3(0.49f));
+                    fluid.Solver.m_particleVel[p] = worldVel / fluid.Size;
+                    anyMoved = true;
+                }
+                ++p;
             }
 
-            if (moved) {
-                fluid.Solver.m_particlePos[p] = glm::clamp(fluid.WorldToLocal(world), glm::vec3(-0.49f), glm::vec3(0.49f));
-                fluid.Solver.m_particleVel[p] = worldVel / fluid.Size;
-            }
+            if (!anyMoved) break;
         }
     }
 }

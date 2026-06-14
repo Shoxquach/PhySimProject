@@ -135,6 +135,7 @@ namespace VCX::Labs::Final {
         void DrawLaunchPlaneGuide();
         void DrawSlingshot(glm::vec3 const & leftFork, glm::vec3 const & rightFork, glm::vec3 const & birdPos, float stretchRatio, glm::vec3 const & baseColor);
         void DrawFluid();
+        void DrawFluidSurface(FluidWorld const & fluid);
 
         glm::vec3 GetLaunchPlaneForward() const;
         glm::vec3 GetLaunchPlaneNormal() const;
@@ -143,4 +144,3 @@ namespace VCX::Labs::Final {
         glm::vec3 ScreenToLaunchPlane(ImVec2 const & mousePos) const;
     };
 }
-

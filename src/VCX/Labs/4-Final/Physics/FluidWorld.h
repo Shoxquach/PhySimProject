@@ -75,9 +75,20 @@ namespace VCX::Labs::Final {
             l.z = std::clamp(l.z, -0.5f, 0.5f);
             glm::ivec3 c = Solver.getParticleCell(glm::vec3(l.x, 0.f, l.z));
             int const Z = Solver.m_iCellZ;
-            int const col = c.x * Z + c.z;
-            float ly = -0.5f;
-            if (col >= 0 && col < int(SurfaceLocalY.size())) ly = SurfaceLocalY[col];
+            float weighted = 0.f;
+            float weights = 0.f;
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    int const x = std::clamp(c.x + dx, 0, Solver.m_iCellX - 1);
+                    int const z = std::clamp(c.z + dz, 0, Solver.m_iCellZ - 1);
+                    int const col = x * Z + z;
+                    if (col < 0 || col >= int(SurfaceLocalY.size()) || SurfaceLocalY[col] <= -0.5f) continue;
+                    float const w = (dx == 0 && dz == 0) ? 4.f : ((dx == 0 || dz == 0) ? 2.f : 1.f);
+                    weighted += SurfaceLocalY[col] * w;
+                    weights += w;
+                }
+            }
+            float ly = weights > 0.f ? weighted / weights : -0.5f;
             return Center.y + ly * Size.y;
         }
 
@@ -105,11 +116,25 @@ namespace VCX::Labs::Final {
         void UpdateHeightField() {
             int const X = Solver.m_iCellX;
             int const Z = Solver.m_iCellZ;
-            SurfaceLocalY.assign(std::size_t(X) * Z, -0.5f);
+            std::vector<float> nextSurface(std::size_t(X) * Z, -0.5f);
             for (glm::vec3 const & p : Solver.m_particlePos) {
                 glm::ivec3 c = Solver.getParticleCell(p);
                 int const col = c.x * Z + c.z;
-                if (p.y > SurfaceLocalY[col]) SurfaceLocalY[col] = p.y;
+                if (p.y > nextSurface[col]) nextSurface[col] = p.y;
+            }
+
+            if (SurfaceLocalY.size() != nextSurface.size()) {
+                SurfaceLocalY = nextSurface;
+                return;
+            }
+
+            constexpr float SurfaceBlend = 0.28f;
+            for (std::size_t i = 0; i < nextSurface.size(); ++i) {
+                if (nextSurface[i] <= -0.5f || SurfaceLocalY[i] <= -0.5f) {
+                    SurfaceLocalY[i] = nextSurface[i];
+                } else {
+                    SurfaceLocalY[i] = SurfaceLocalY[i] * (1.f - SurfaceBlend) + nextSurface[i] * SurfaceBlend;
+                }
             }
         }
     };

@@ -19,7 +19,7 @@ namespace VCX::Labs::Final {
         std::vector<glm::vec3> m_particleVel;
         std::vector<glm::vec3> m_particleColor;
 
-        float m_fRatio { 0.95f };
+        float m_fRatio { 0.82f };
         int   m_iCellX { 0 };
         int   m_iCellY { 0 };
         int   m_iCellZ { 0 };
@@ -180,8 +180,21 @@ namespace VCX::Labs::Final {
         void integrateParticles(float timeStep) {
             for (std::size_t i = 0; i < m_particlePos.size(); i++) {
                 m_particleVel[i] += gravity * timeStep;
-                m_particlePos[i] += m_particleVel[i] * timeStep;
+            m_particlePos[i] += m_particleVel[i] * timeStep;
+        }
+    }
+
+        void removeParticle(std::size_t i) {
+            std::size_t const last = m_particlePos.size() - 1;
+            if (i != last) {
+                m_particlePos[i] = m_particlePos[last];
+                m_particleVel[i] = m_particleVel[last];
+                m_particleColor[i] = m_particleColor[last];
             }
+            m_particlePos.pop_back();
+            m_particleVel.pop_back();
+            m_particleColor.pop_back();
+            m_iNumSpheres = int(m_particlePos.size());
         }
 
         void pushParticlesApart(int numIters) {
@@ -230,25 +243,37 @@ namespace VCX::Labs::Final {
 
         void handleParticleCollisions() {
             float lo = -0.5f + m_h + m_particleRadius;
-            float hi = 0.5f - 2.0f * m_h - m_particleRadius;
+            float sideHi = 0.5f - 2.0f * m_h - m_particleRadius;
+            float topOutflow = 0.5f - 1.20f * m_particleRadius;
             float wallBand = 2.5f * m_particleRadius;
 
-            for (std::size_t i = 0; i < m_particlePos.size(); i++) {
-                for (int d = 0; d < 3; d++) {
+            for (std::size_t i = 0; i < m_particlePos.size();) {
+                if (m_particlePos[i].y > topOutflow) {
+                    removeParticle(i);
+                    continue;
+                }
+
+                for (int d : { 0, 2 }) {
                     if (m_particlePos[i][d] < lo) {
                         m_particlePos[i][d] = lo;
                         if (m_particleVel[i][d] < 0.0f) m_particleVel[i][d] = 0.0f;
                     }
-                    if (m_particlePos[i][d] > hi) {
-                        m_particlePos[i][d] = hi;
+                    if (m_particlePos[i][d] > sideHi) {
+                        m_particlePos[i][d] = sideHi;
                         if (m_particleVel[i][d] > 0.0f) m_particleVel[i][d] = 0.0f;
                     }
+                }
+
+                if (m_particlePos[i].y < lo) {
+                    m_particlePos[i].y = lo;
+                    if (m_particleVel[i].y < 0.0f) m_particleVel[i].y = 0.0f;
                 }
 
                 if (m_particlePos[i].y < lo + wallBand) {
                     m_particleVel[i].x *= 0.35f;
                     m_particleVel[i].z *= 0.35f;
                 }
+                ++i;
             }
         }
 
@@ -415,20 +440,16 @@ namespace VCX::Labs::Final {
                 float t     = std::clamp(speed / 3.0f, 0.0f, 1.0f);
                 t           = std::sqrt(t);
 
-                glm::vec3 blue(0.00f, 0.05f, 1.00f);
-                glm::vec3 cyan(0.00f, 0.95f, 1.00f);
-                glm::vec3 yellow(1.00f, 0.95f, 0.00f);
-                glm::vec3 red(1.00f, 0.05f, 0.00f);
+                glm::vec3 deep(0.02f, 0.16f, 0.72f);
+                glm::vec3 water(0.04f, 0.55f, 0.95f);
+                glm::vec3 foam(0.72f, 0.95f, 1.00f);
 
-                if (t < 0.33f) {
-                    float a = t / 0.33f;
-                    m_particleColor[i] = blue * (1.0f - a) + cyan * a;
-                } else if (t < 0.66f) {
-                    float a = (t - 0.33f) / 0.33f;
-                    m_particleColor[i] = cyan * (1.0f - a) + yellow * a;
+                if (t < 0.72f) {
+                    float a = t / 0.72f;
+                    m_particleColor[i] = deep * (1.0f - a) + water * a;
                 } else {
-                    float a = (t - 0.66f) / 0.34f;
-                    m_particleColor[i] = yellow * (1.0f - a) + red * a;
+                    float a = (t - 0.72f) / 0.28f;
+                    m_particleColor[i] = water * (1.0f - a) + foam * a;
                 }
             }
         }
@@ -445,7 +466,7 @@ namespace VCX::Labs::Final {
             int   numPressureIters  = 40;
             bool  separateParticles = true;
             float overRelaxation    = 1.6f;
-            bool  compensateDrift   = false;
+            bool  compensateDrift   = true;
 
             float sdt = dt / float(numSubSteps);
 
@@ -520,7 +541,7 @@ namespace VCX::Labs::Final {
                 for (int j = 0; j < m_iCellY; j++) {
                     for (int k = 0; k < m_iCellZ; k++) {
                         float s = 1.0f;
-                        if (i == 0 || i >= m_iCellX - 2 || j == 0 || j >= m_iCellY - 2 || k == 0 || k >= m_iCellZ - 2)
+                        if (i == 0 || i >= m_iCellX - 2 || j == 0 || k == 0 || k >= m_iCellZ - 2)
                             s = 0.0f;
                         m_s[cellId(i, j, k)] = s;
                     }

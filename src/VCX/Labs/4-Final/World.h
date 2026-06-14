@@ -32,6 +32,7 @@ namespace VCX::Labs::Final {
             if (!Fluid) return;
             if (Couple.FlowSolid) {
                 Coupling::MarkRigidSolids(Rigid, *Fluid);
+                Coupling::PushParticlesOutOfRigid(Rigid, *Fluid);
             }
             Fluid->Step(dt);
             if (Couple.FlowSolid) {

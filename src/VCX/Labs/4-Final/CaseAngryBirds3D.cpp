@@ -1007,11 +1007,22 @@ namespace VCX::Labs::Final {
             _pointProgram.GetUniforms().SetByName("u_Projection",
                 _camera.GetProjectionMatrix(float(_frame.GetSize().first) / float(_frame.GetSize().second)));
             _pointProgram.GetUniforms().SetByName("u_View", _camera.GetViewMatrix());
+            _pointProgram.GetUniforms().SetByName("u_PointRadius",
+                fluid.Solver.m_particleRadius * std::max({ fluid.Size.x, fluid.Size.y, fluid.Size.z }) * 1.45f);
+            _pointProgram.GetUniforms().SetByName("u_PointScale", float(_frame.GetSize().second));
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDepthMask(GL_FALSE);
+            glEnable(GL_PROGRAM_POINT_SIZE);
             _fluidItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<FluidVertex>(verts));
-            glPointSize(7.f);
             _fluidItem.Draw({ _pointProgram.Use() });
-            glPointSize(1.f);
+            glDisable(GL_PROGRAM_POINT_SIZE);
+            glDepthMask(GL_TRUE);
+            glDisable(GL_BLEND);
         }
+
+        DrawFluidSurface(fluid);
 
         glm::vec3 const lo = fluid.BoxMin();
         glm::vec3 const hi = fluid.BoxMax();
@@ -1026,6 +1037,66 @@ namespace VCX::Labs::Final {
         for (auto const & e : edges) {
             DrawLine(v[e[0]], v[e[1]], edgeColor);
         }
+    }
+
+    void CaseAngryBirds3D::DrawFluidSurface(FluidWorld const & fluid) {
+        int const xCount = fluid.GridX();
+        int const zCount = fluid.GridZ();
+        if (xCount < 2 || zCount < 2 || fluid.SurfaceLocalY.size() < std::size_t(xCount * zCount)) return;
+
+        float const minSurface = -0.5f + fluid.Solver.m_h * 1.35f;
+        auto surface = [&](int x, int z) {
+            return fluid.SurfaceLocalY[std::size_t(x * zCount + z)];
+        };
+        auto localX = [&](int x) {
+            return (float(x) + 0.5f) * fluid.Solver.m_h - 0.5f;
+        };
+        auto localZ = [&](int z) {
+            return (float(z) + 0.5f) * fluid.Solver.m_h - 0.5f;
+        };
+        auto point = [&](int x, int z, float y) {
+            return fluid.LocalToWorld(glm::vec3(localX(x), y, localZ(z)));
+        };
+
+        std::vector<Vertex> vertices;
+        vertices.reserve(std::size_t(xCount - 1) * std::size_t(zCount - 1) * 6);
+        auto addTri = [&](glm::vec3 const & a, glm::vec3 const & b, glm::vec3 const & c) {
+            glm::vec3 normal = glm::cross(b - a, c - a);
+            if (glm::length(normal) < 1e-6f) normal = glm::vec3(0.f, 1.f, 0.f);
+            else normal = glm::normalize(normal);
+            if (normal.y < 0.f) normal = -normal;
+            vertices.push_back(Vertex { a, normal, glm::vec2(0.f, 0.f), glm::vec3(0.f) });
+            vertices.push_back(Vertex { b, normal, glm::vec2(1.f, 0.f), glm::vec3(0.f) });
+            vertices.push_back(Vertex { c, normal, glm::vec2(1.f, 1.f), glm::vec3(0.f) });
+        };
+
+        for (int x = 0; x < xCount - 1; ++x) {
+            for (int z = 0; z < zCount - 1; ++z) {
+                float const h00 = surface(x, z);
+                float const h10 = surface(x + 1, z);
+                float const h11 = surface(x + 1, z + 1);
+                float const h01 = surface(x, z + 1);
+                if (h00 <= minSurface || h10 <= minSurface || h11 <= minSurface || h01 <= minSurface) continue;
+
+                glm::vec3 const p00 = point(x, z, h00);
+                glm::vec3 const p10 = point(x + 1, z, h10);
+                glm::vec3 const p11 = point(x + 1, z + 1, h11);
+                glm::vec3 const p01 = point(x, z + 1, h01);
+                addTri(p00, p10, p11);
+                addTri(p00, p11, p01);
+            }
+        }
+        if (vertices.empty()) return;
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+        _program.GetUniforms().SetByName("u_Color", glm::vec3(0.06f, 0.48f, 0.96f));
+        _program.GetUniforms().SetByName("u_Alpha", 0.34f);
+        _boxItem.UpdateVertexBuffer("vertex", Engine::make_span_bytes<Vertex>(vertices));
+        _boxItem.Draw({ _diffuseTexture.Use(), _specularTexture.Use(), _heightTexture.Use(), _program.Use() });
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
     }
 
     void CaseAngryBirds3D::DrawHUD() {
