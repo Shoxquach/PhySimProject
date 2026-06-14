@@ -115,6 +115,8 @@ namespace VCX::Labs::Final {
             "Grand Citadel",
             "Moat (Buoyancy)",
             "Dam Break (Two-way)",
+            "Sunken Temple",
+            "Overhang Fort",
         };
 
         if (ImGui::Combo("Level", &_levelIndex, LevelNames, IM_ARRAYSIZE(LevelNames))) {
@@ -401,7 +403,7 @@ namespace VCX::Labs::Final {
             _autoAdvanceTimer += dt;
             if (_autoAdvanceTimer >= _autoAdvanceDelay) {
                 _autoAdvanceActive = false;
-                _levelIndex = (_levelIndex + 1) % 8;  // 8 levels, wrap around
+                _levelIndex = (_levelIndex + 1) % 10;  // 8 levels, wrap around
                 ResetScene();
             }
         }
@@ -1049,7 +1051,7 @@ namespace VCX::Labs::Final {
         std::string advanceStr;
         if (_autoAdvanceActive) {
             float const remaining = std::max(_autoAdvanceDelay - _autoAdvanceTimer, 0.f);
-            int const nextLevel = (_levelIndex + 1) % 8;
+            int const nextLevel = (_levelIndex + 1) % 10;
             advanceStr = "Cleared! Next level in " + std::to_string(int(remaining * 10.f) / 10.f) + "s...";
             advancesz = font->CalcTextSizeA(subSize, FLT_MAX, 0.f, advanceStr.c_str());
             advanceH = subSize + 4.f;

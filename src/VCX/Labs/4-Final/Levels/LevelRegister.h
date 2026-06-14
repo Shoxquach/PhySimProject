@@ -6,12 +6,14 @@
 
 #include "Labs/4-Final/Levels/ILevel.h"
 #include "Labs/4-Final/Levels/BoomerangChallengeLevel.h"
+#include "Labs/4-Final/Levels/OverhangFortLevel.h"
 #include "Labs/4-Final/Levels/ClassicTowerLevel.h"
 #include "Labs/4-Final/Levels/DominoRunLevel.h"
 #include "Labs/4-Final/Levels/DamBreakLevel.h"
 #include "Labs/4-Final/Levels/GrandCitadelLevel.h"
 #include "Labs/4-Final/Levels/MoatLevel.h"
 #include "Labs/4-Final/Levels/StoneCastleLevel.h"
+#include "Labs/4-Final/Levels/SunkenTempleLevel.h"
 #include "Labs/4-Final/Levels/TargetPracticeLevel.h"
 
 namespace VCX::Labs::Final {
@@ -27,6 +29,8 @@ namespace VCX::Labs::Final {
             GrandCitadel,
             Moat,
             DamBreak,
+            SunkenTemple,
+            OverhangFort,
         };
 
         /// @brief 获取注册管理器单例
@@ -62,6 +66,8 @@ namespace VCX::Labs::Final {
             _levelMap[static_cast<int>(LevelID::GrandCitadel)] = std::make_shared<GrandCitadelLevel>();
             _levelMap[static_cast<int>(LevelID::Moat)] = std::make_shared<MoatLevel>();
             _levelMap[static_cast<int>(LevelID::DamBreak)] = std::make_shared<DamBreakLevel>();
+            _levelMap[static_cast<int>(LevelID::SunkenTemple)] = std::make_shared<SunkenTempleLevel>();
+            _levelMap[static_cast<int>(LevelID::OverhangFort)] = std::make_shared<OverhangFortLevel>();
         }
 
         ~LevelRegister() = default;
